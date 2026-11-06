@@ -44,13 +44,18 @@ function welcome() {
   ].join("\n");
 }
 
-/* Rasadino weather v1: independent of other projects; public Open-Meteo model data. */
+
+/* Weather v2: Google-inspired current/hourly/daily UX, not Google forecast data.
+ * Open-Meteo best_match selects available global/regional numerical models.
+ * The hourly outlook is NOT radar nowcasting (which is not guaranteed in Iran).
+ */
 const GOLESTAN_CITIES = Object.freeze([
   {id:"gorgan", name:"گرگان", latitude:36.84270, longitude:54.44391},
   {id:"aqqala", name:"آق‌قلا", latitude:37.01390, longitude:54.45504},
   {id:"kordkuy", name:"کردکوی", latitude:36.79307, longitude:54.11214},
   {id:"aliabad", name:"علی‌آباد کتول", latitude:36.91011, longitude:54.86737}
 ]);
+const WEATHER_HOURS = 12;
 function weatherDescription(code) {
   const descriptions = {
     0:"☀️ صاف", 1:"🌤 عمدتاً صاف", 2:"⛅ نیمه‌ابری", 3:"☁️ ابری",
@@ -73,73 +78,114 @@ function weatherNumber(v, digits=0) {
 function goodTemp(v) {
   return typeof v === "number" && Number.isFinite(v) && v >= -60 && v <= 65;
 }
+function validChance(v) {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100;
+}
+function validRain(v) {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 500;
+}
+function tehranHour(date) {
+  return new Intl.DateTimeFormat("fa-IR", {
+    timeZone:TIMEZONE, hour:"2-digit", minute:"2-digit", hourCycle:"h23"
+  }).format(date);
+}
+/* Hourly timestamps from Open-Meteo use the requested local timezone.
+ * Include the current local hour and the following 11 hourly periods.
+ */
+function upcomingWeatherHours(hourly, now=Date.now()) {
+  if(!hourly || !Array.isArray(hourly.time)) return [];
+  const baseline = Math.floor(now / 3600000) * 3600000;
+  const end = baseline + WEATHER_HOURS * 3600000;
+  const hours = [];
+  for(let i=0;i<hourly.time.length;i++) {
+    const local = hourly.time[i];
+    if(typeof local !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(local)) continue;
+    const at = Date.parse(local + "+03:30");
+    if(!Number.isFinite(at) || at < baseline || at >= end) continue;
+    hours.push({
+      at, temperature:hourly.temperature_2m?.[i], code:hourly.weather_code?.[i],
+      chance:hourly.precipitation_probability?.[i], rain:hourly.precipitation?.[i]
+    });
+  }
+  return hours.sort((a,b)=>a.at-b.at).slice(0,WEATHER_HOURS);
+}
+function precipitationOutlook(hours) {
+  const withChance = hours.filter(h=>validChance(h.chance));
+  if(withChance.length < 4) return "🌧 پیش‌بینی ساعتی بارش فعلاً در دسترس نیست.";
+  const peak = withChance.reduce((a,b)=>b.chance>a.chance?b:a);
+  const hasAllRain = hours.length >= 4 && hours.every(h=>validRain(h.rain));
+  const rainTotal = hasAllRain ? hours.reduce((sum,h)=>sum+h.rain,0) : null;
+  let line = "🌧 تا ۱۲ ساعت آینده: بیشترین احتمال بارش "+weatherNumber(peak.chance)+"٪";
+  if(peak.chance >= 40) line += " (حوالی "+tehranHour(new Date(peak.at))+")";
+  if(rainTotal !== null) line += " | بارش پیش‌بینی‌شده "+weatherNumber(rainTotal,1)+" میلی‌متر";
+  const likely = withChance.find(h=>h.chance>=50 && validRain(h.rain) && h.rain>=0.1);
+  if(likely) line += "\n☔ اولین ساعت با احتمال بالاتر بارش: حوالی "+tehranHour(new Date(likely.at));
+  return line;
+}
 async function fetchCityForecast(city) {
   const query = new URLSearchParams({
     latitude:String(city.latitude), longitude:String(city.longitude),
     current:"temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
+    hourly:"temperature_2m,weather_code,precipitation_probability,precipitation",
     daily:"weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_gusts_10m_max",
-    timezone:"Asia/Tehran", forecast_days:"2", temperature_unit:"celsius",
-    wind_speed_unit:"kmh", precipitation_unit:"mm"
+    models:"best_match", timezone:TIMEZONE, forecast_days:"2",
+    temperature_unit:"celsius", wind_speed_unit:"kmh", precipitation_unit:"mm"
   });
   const response = await fetch("https://api.open-meteo.com/v1/forecast?"+query, {
     headers:{"Accept":"application/json"},signal:AbortSignal.timeout(9000)
   });
   if(!response.ok) throw new Error("Open-Meteo HTTP " + response.status);
   const data = await response.json();
-  if(data.timezone!=="Asia/Tehran" || !data.current || !data.daily ||
+  if(data.timezone!==TIMEZONE || !data.current || !data.daily ||
      !goodTemp(data.current.temperature_2m) || !Array.isArray(data.daily.time) ||
      data.daily.time.length < 2 || !goodTemp(data.daily.temperature_2m_min?.[0]) ||
-     !goodTemp(data.daily.temperature_2m_max?.[0])) {
+     !goodTemp(data.daily.temperature_2m_max?.[0]) ||
+     !goodTemp(data.daily.temperature_2m_min?.[1]) ||
+     !goodTemp(data.daily.temperature_2m_max?.[1])) {
     throw new Error("Incomplete or invalid weather forecast for " + city.id);
   }
   const currentTime = Date.parse(data.current.time + "+03:30");
   if(!Number.isFinite(currentTime) || Math.abs(Date.now()-currentTime)>3*60*60*1000) {
     throw new Error("Stale weather model current timestamp for " + city.id);
   }
-  return {city:city.name,current:data.current,daily:data.daily,updatedAt:data.current.time};
+  return {city:city.name,current:data.current,daily:data.daily,
+    hourly:data.hourly,updatedAt:data.current.time};
 }
 async function getWeatherReport(env) {
-  const cacheKey = "weather:golestan:4cities:v1";
-  try {
-    const cached = await env.STATE.get(cacheKey);
-    if(cached) return cached;
-  }catch(e){ console.log("Weather KV read skipped: "+String(e)); }
+  const cacheKey = "weather:golestan:4cities:v2";
+  try {const cached=await env.STATE.get(cacheKey);if(cached)return cached;}
+  catch(e) {console.log("Weather KV read skipped: "+String(e));}
   const results = await Promise.all(GOLESTAN_CITIES.map(async city=>{
-    try { return await fetchCityForecast(city); }
-    catch(e) { console.log("Weather fetch "+city.id+": "+String(e)); return {city:city.name,error:true}; }
+    try {return await fetchCityForecast(city);}
+    catch(e) {console.log("Weather fetch "+city.id+": "+String(e));return {city:city.name,error:true};}
   }));
   const stamp = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-    timeZone:"Asia/Tehran",dateStyle:"medium",timeStyle:"short"
+    timeZone:TIMEZONE,dateStyle:"medium",timeStyle:"short"
   }).format(new Date());
   const rows = ["🌤 هواشناسی چهار شهر استان گلستان","🗓 "+stamp,""];
   for(const data of results){
     rows.push("📍 "+data.city);
-    if(data.error){
-      rows.push("داده معتبر هواشناسی در دسترس نیست.","");
-      continue;
-    }
-    const c=data.current, d=data.daily;
+    if(data.error){rows.push("داده معتبر هواشناسی در دسترس نیست.","");continue;}
+    const c=data.current,d=data.daily;
     rows.push("اکنون: "+weatherDescription(c.weather_code)+" | "+weatherNumber(c.temperature_2m,1)+"°C"+
       " (احساسی "+weatherNumber(c.apparent_temperature,1)+"°C)");
     rows.push("رطوبت: "+weatherNumber(c.relative_humidity_2m)+"٪ | باد: "+weatherNumber(c.wind_speed_10m)+" km/h");
     for(let day=0;day<2;day++){
       rows.push((day===0?"امروز":"فردا")+": "+weatherDescription(d.weather_code?.[day])+
         " | "+weatherNumber(d.temperature_2m_min?.[day],1)+" تا "+weatherNumber(d.temperature_2m_max?.[day],1)+"°C"+
-        " | احتمال بارش تا "+weatherNumber(d.precipitation_probability_max?.[day])+"٪"+
+        " | بیشینه احتمال بارش "+weatherNumber(d.precipitation_probability_max?.[day])+"٪"+
         " | بارش "+weatherNumber(d.precipitation_sum?.[day],1)+" mm");
     }
-    rows.push("");
+    rows.push(precipitationOutlook(upcomingWeatherHours(data.hourly)),"");
   }
-  rows.push("منبع: Open-Meteo — پیش‌بینی مدل هواشناسی برای مرکز هر شهر؛ ممکن است با وضعیت واقعی محله‌ها تفاوت داشته باشد.");
+  rows.push("منبع: Open-Meteo (گزینش مدل‌های هواشناسی)؛ پیش‌بینی برای مرکز شهر است، نه گزارش قطعی ایستگاه.");
   const report = rows.join("\n");
-  if(results.some(x=>!x.error)){
-    try {await env.STATE.put(cacheKey,report,{expirationTtl:600});}
-    catch(e){console.log("Weather KV write skipped: "+String(e));}
+  if(results.some(x=>!x.error)) {
+    try {await env.STATE.put(cacheKey,report,{expirationTtl:300});}
+    catch(e) {console.log("Weather KV write skipped: "+String(e));}
   }
   return report;
 }
-
-
 const CITY_KEYBOARD = {
   inline_keyboard: [
     [{text:"🌤 گرگان",callback_data:"weather:gorgan"},{text:"🌤 آق‌قلا",callback_data:"weather:aqqala"}],
@@ -150,44 +196,76 @@ const CITY_KEYBOARD = {
 async function sendWeatherMenu(env,chatId) {
   return telegram(env,"sendMessage",{
     chat_id:chatId,
-    text:"🌤 آب‌وهوای استان گلستان\n\n👇 شهر موردنظر را انتخاب کن تا فقط پیش‌بینی همان شهر نمایش داده شود.",
+    text:"🌤 آب‌وهوای استان گلستان\n\n👇 شهر موردنظر را انتخاب کن تا پیش‌بینی همان شهر نمایش داده شود.",
     reply_markup:CITY_KEYBOARD
   });
 }
-async function singleCityWeather(env,cityId) {
+async function cityForecastCached(env,city) {
+  const key="weather:city:"+city.id+":v3";
+  try {
+    const cached=await env.STATE.get(key);
+    if(cached) return JSON.parse(cached);
+  }catch(e){console.log("weather cache read: "+String(e));}
+  const data=await fetchCityForecast(city);
+  try {await env.STATE.put(key,JSON.stringify(data),{expirationTtl:300});}
+  catch(e){console.log("weather cache write: "+String(e));}
+  return data;
+}
+async function singleCityWeather(env,cityId,view="summary") {
   const city = GOLESTAN_CITIES.find(c=>c.id===cityId);
   if(!city) return "شهر انتخاب‌شده معتبر نیست.";
   let data;
-  const key="weather:city:"+city.id+":v2";
-  try {const cached=await env.STATE.get(key);
-    if(cached) data=JSON.parse(cached);
-  } catch(e) {console.log("weather cache read: "+String(e));}
-  if(!data) {
-    try {
-      data=await fetchCityForecast(city);
-      await env.STATE.put(key,JSON.stringify(data),{expirationTtl:300});
-    } catch(e) {
-      console.log("weather single city unavailable: "+String(e.message));
-      return "⚠️ اطلاعات به‌روز "+city.name+" فعلاً در دسترس نیست؛ لطفاً کمی بعد دوباره امتحان کن.";
-    }
+  try {data=await cityForecastCached(env,city);}
+  catch(e) {
+    console.log("weather single city unavailable: "+String(e.message));
+    return "⚠️ اطلاعات به‌روز "+city.name+" فعلاً در دسترس نیست؛ لطفاً کمی بعد دوباره امتحان کن.";
+  }
+  const time=tehranHour(new Date(data.updatedAt+"+03:30"));
+  const hours=upcomingWeatherHours(data.hourly);
+  if(view==="hourly") {
+    if(!hours.length) return "⚠️ پیش‌بینی ساعتی "+city.name+" فعلاً در دسترس نیست.";
+    return [
+      "🕒 پیش‌بینی ساعتی "+city.name+" — تا ۱۲ ساعت آینده",
+      "📡 آخرین وضعیت مدل: "+time+" (ایران)",
+      "",
+      ...hours.map(h=>
+        tehranHour(new Date(h.at))+" | "+weatherDescription(h.code)+
+        " | "+weatherNumber(h.temperature,1)+"°C"+
+        " | احتمال بارش "+weatherNumber(validChance(h.chance)?h.chance:null)+"٪"
+      ),
+      "",
+      "📍 منبع: Open-Meteo (best_match) | ساعت‌ها به وقت ایران",
+      "این پیش‌بینی ساعتی است، نه رادار بارش لحظه‌ای."
+    ].join("\n");
   }
   const c=data.current,d=data.daily;
-  const time=new Intl.DateTimeFormat("fa-IR",{timeZone:TIMEZONE,hour:"2-digit",minute:"2-digit"}).format(new Date(data.updatedAt+"+03:30"));
   return [
     "🌤 آب‌وهوای "+city.name,
-    "🕒 وضعیت ساعت "+time+" (ایران)",
+    "🕒 وضعیت برآوردی ساعت "+time+" (ایران)",
     "",
     weatherDescription(c.weather_code)+" | "+weatherNumber(c.temperature_2m,1)+"°C",
     "🌡 دمای احساسی: "+weatherNumber(c.apparent_temperature,1)+"°C",
     "💧 رطوبت: "+weatherNumber(c.relative_humidity_2m)+"٪ | 💨 باد: "+weatherNumber(c.wind_speed_10m)+" کیلومتر/ساعت",
     "",
-    "📅 امروز: "+weatherNumber(d.temperature_2m_min?.[0],1)+" تا "+weatherNumber(d.temperature_2m_max?.[0],1)+"°C"+
-      " | 🌧 احتمال بارش "+weatherNumber(d.precipitation_probability_max?.[0])+"٪",
-    "📅 فردا: "+weatherNumber(d.temperature_2m_min?.[1],1)+" تا "+weatherNumber(d.temperature_2m_max?.[1],1)+"°C"+
-      " | 🌧 احتمال بارش "+weatherNumber(d.precipitation_probability_max?.[1])+"٪",
+    "📅 امروز: "+weatherDescription(d.weather_code?.[0])+" | "+weatherNumber(d.temperature_2m_min?.[0],1)+
+      " تا "+weatherNumber(d.temperature_2m_max?.[0],1)+"°C"+
+      " | 🌧 بیشینه احتمال بارش "+weatherNumber(d.precipitation_probability_max?.[0])+"٪",
+    "📅 فردا: "+weatherDescription(d.weather_code?.[1])+" | "+weatherNumber(d.temperature_2m_min?.[1],1)+
+      " تا "+weatherNumber(d.temperature_2m_max?.[1],1)+"°C"+
+      " | 🌧 بیشینه احتمال بارش "+weatherNumber(d.precipitation_probability_max?.[1])+"٪",
     "",
-    "منبع: Open-Meteo | پیش‌بینی برای مختصات مرکز شهر"
+    precipitationOutlook(hours),
+    "",
+    "منبع: Open-Meteo (best_match) | پیش‌بینی مدل‌ها برای مرکز شهر، نه داده اختصاصی Google Weather"
   ].join("\n");
+}
+function weatherViewKeyboard(cityId,view) {
+  return {inline_keyboard:[
+    [{text:view==="hourly"?"🌤 بازگشت به خلاصه":"🕒 جزئیات ۱۲ ساعت آینده",
+      callback_data:(view==="hourly"?"weather:":"weather:hourly:")+cityId}],
+    [{text:"🔁 انتخاب شهر دیگر",callback_data:"weather:menu"}],
+    [{text:"🏠 بازگشت به منو",callback_data:"main:menu"}]
+  ]};
 }
 
 /* Public user registry. Store only the Telegram chat ID (as KV key) and opt-in state. */
@@ -308,14 +386,14 @@ async function onCallbackQuery(query,env) {
     await sendGolestanNews(env,chatId,true,0);
   } else if(query.data==="weather:menu") {
     await sendWeatherMenu(env,chatId);
-  } else if(/^weather:(gorgan|aqqala|kordkuy|aliabad)$/.test(query.data)) {
-    const weatherText=await singleCityWeather(env,query.data.slice(8));
-    await telegram(env,"sendMessage",{chat_id:chatId,text:weatherText,reply_markup:{
-      inline_keyboard: [
-        [{text:"🔁 انتخاب شهر دیگر",callback_data:"weather:menu"}],
-        [{text:"🏠 بازگشت به منو",callback_data:"main:menu"}]
-      ]
-    }});
+  } else if(/^weather:(?:hourly:)?(gorgan|aqqala|kordkuy|aliabad)$/.test(query.data)) {
+    const hourly=query.data.startsWith("weather:hourly:");
+    const cityId=query.data.slice(hourly?15:8);
+    const view=hourly?"hourly":"summary";
+    const weatherText=await singleCityWeather(env,cityId,view);
+    await telegram(env,"sendMessage",{
+      chat_id:chatId,text:weatherText,reply_markup:weatherViewKeyboard(cityId,view)
+    });
   }
 }
 async function onUpdate(update,env) {
