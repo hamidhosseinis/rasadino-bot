@@ -4,11 +4,23 @@ import worker, {GOLESTAN_CITIES, cityWeatherKeyboard} from "../src/worker.mjs";
 
 const seed = () => {
   const values = new Map();
+  const metadata = new Map();
   return {
     async get(key) {return values.get(key) ?? null;},
-    async put(key,value) {values.set(key,value);},
-    async delete(key) {values.delete(key);},
-    async list() {return {keys:[],list_complete:true};}
+    async put(key,value,options={}) {
+      values.set(key,value);
+      metadata.set(key,options.metadata ?? null);
+    },
+    async delete(key) {values.delete(key);metadata.delete(key);},
+    async list({prefix="",cursor,limit=1000}={}) {
+      const keys=[...values.keys()].filter(k=>k.startsWith(prefix)).sort();
+      const start=Number(cursor||0);
+      const items=keys.slice(start,start+limit).map(name=>({
+        name,metadata:metadata.get(name)??undefined
+      }));
+      const list_complete=start+limit>=keys.length;
+      return {keys:items,list_complete,cursor:list_complete?undefined:String(start+limit)};
+    }
   };
 };
 const env = () => ({STATE:seed(),BOT_TOKEN:"TEST_TOKEN",WEBHOOK_SECRET:"test-secret"});
