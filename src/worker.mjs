@@ -15,22 +15,93 @@ async function telegram(env, method, data = {}) {
   if (!response.ok || !json.ok) throw new Error("Telegram " + method + ": " + (json.description || response.status));
   return json.result;
 }
-const MENU_KEYBOARD = {
-  keyboard: [
-    [{text: "🚀 شروع"}],
-    [{text: "💰 قیمت"}, {text: "🌤 آب و هوا"}],
-    [{text: "📰 اخبار"}, {text: "💬 پشتیبان"}],
-    [{text: "📚 منابع"}]
-  ],
-  resize_keyboard: true,
-  is_persistent: true,
-  input_field_placeholder: "یکی از گزینه‌های رصدینو را انتخاب کن"
-};
-async function send(env, chatId, text) {
-  return telegram(env, "sendMessage", {
-    chat_id: chatId, text, disable_web_page_preview: true, reply_markup: MENU_KEYBOARD
+
+const MAIN_MENU_KEYBOARD = {inline_keyboard:[
+  [{text:"💰 قیمت‌ها",callback_data:"price:menu"}, {text:"🌤 آب‌وهوا",callback_data:"weather:menu"}],
+  [{text:"📰 اخبار",callback_data:"news:refresh"}, {text:"📚 منابع",callback_data:"sources:show"}],
+  [{text:"💬 پشتیبانی",callback_data:"support:show"}],
+  [{text:"❌ بستن منو",callback_data:"menu:close"}]
+]};
+const BACK_CLOSE = [
+  [{text:"🏠 منوی اصلی",callback_data:"main:menu"}, {text:"❌ بستن",callback_data:"menu:close"}]
+];
+function priceMenuKeyboard() {
+  return {inline_keyboard:[
+    [{text:"₿ بیت‌کوین",callback_data:"price:btc"}, {text:"💵 تتر",callback_data:"price:usdt"}],
+    [{text:"🥇 طلای ۱۸ عیار",callback_data:"price:gold"}, {text:"📊 همه قیمت‌ها",callback_data:"price:all"}],
+    [{text:"🔄 تازه‌سازی همه قیمت‌ها",callback_data:"price:refresh"}],
+    ...BACK_CLOSE
+  ]};
+}
+function priceResultKeyboard() {
+  return {inline_keyboard:[
+    [{text:"🔄 تازه‌سازی",callback_data:"price:refresh"}],
+    [{text:"💰 انتخاب قیمت دیگر",callback_data:"price:menu"}],
+    ...BACK_CLOSE
+  ]};
+}
+function simpleBackKeyboard() {return {inline_keyboard:BACK_CLOSE};}
+async function send(env, chatId, text, replyMarkup = null) {
+  return telegram(env,"sendMessage",{
+    chat_id:chatId,text,disable_web_page_preview:true,
+    ...(replyMarkup ? {reply_markup:replyMarkup} : {})
   });
 }
+// Navigating an inline menu edits the original message instead of spamming the chat.
+async function renderMenu(env, chatId, text, replyMarkup, messageId = null) {
+  if(messageId) {
+    try {
+      return await telegram(env,"editMessageText",{
+        chat_id:chatId,message_id:messageId,text,disable_web_page_preview:true,
+        reply_markup:replyMarkup
+      });
+    } catch(e) {
+      if(/message is not modified/i.test(String(e.message)))return null;
+      // A legacy or inaccessible message may no longer be editable.
+      console.log("Inline message edit failed; sending a new menu");
+    }
+  }
+  return send(env,chatId,text,replyMarkup);
+}
+async function removeLegacyKeyboardOnce(env,chatId) {
+  const user=await readUser(env,chatId);
+  if(!user || user.ui_version===2)return;
+  await telegram(env,"sendMessage",{
+    chat_id:chatId,
+    text:"✅ منوی ثابت قدیمی پایین صفحه بسته شد. از این پس دکمه‌ها زیر پیام‌های رصدینو قرار دارند.",
+    reply_markup:{remove_keyboard:true}
+  });
+  await env.STATE.put(userKey(chatId),JSON.stringify({...user,ui_version:2}),{
+    metadata:{notifications_enabled:user.notifications_enabled}
+  });
+}
+function priceViewText(pr,asset="all") {
+  const names = {
+    btc:"₿ بیت‌کوین: "+money(pr.btc,"USD"),
+    usdt:"💵 تتر (USDT): "+money(pr.usdt,"IRR"),
+    gold:"🥇 هر گرم طلای ۱۸ عیار: "+money(pr.gold,"IRR")
+  };
+  if(asset==="all")return report(pr);
+  return "💰 قیمت لحظه‌ای\n\n"+names[asset]+
+    "\n\n🕒 زمان دریافت: "+new Intl.DateTimeFormat("fa-IR",{
+      timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
+    }).format(new Date(pr.at));
+}
+async function showMainMenu(env,chatId,messageId=null,note="") {
+  return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
+}
+async function showPriceMenu(env,chatId,messageId=null) {
+  return renderMenu(env,chatId,"💰 قیمت‌های رصدینو\n\n👇 قیمت موردنظر را انتخاب کن.",priceMenuKeyboard(),messageId);
+}
+async function showSupport(env,chatId,messageId=null) {
+  return renderMenu(env,chatId,
+    "💬 ارتباط با پشتیبان رصدینو\nبرای گفتگوی خصوصی با مدیر، دکمه زیر را بزن یا به @hamidhosseinis پیام بده.",
+    {inline_keyboard:[
+      [{text:"💬 گفتگو با پشتیبان",url:"https://t.me/hamidhosseinis"}],
+      ...BACK_CLOSE
+    ]},messageId);
+}
+
 function welcome() {
   return [
     "👋 به رصدینو | Rasadino خوش آمدی!",
@@ -42,7 +113,7 @@ function welcome() {
     "📚 برای دیدن منابع قیمت و هواشناسی، دکمه «منابع» را بزن.",
     "💬 برای ارتباط با مدیر، دکمه «پشتیبان» را انتخاب کن.",
     "",
-    "👇 از دکمه‌های ثابت پایین صفحه استفاده کن."
+    "👇 یکی از دکمه‌های زیر را انتخاب کن."
   ].join("\n");
 }
 
@@ -150,15 +221,13 @@ function cityWeatherKeyboard() {
       text:"🌤 "+city.name, callback_data:"weather:"+city.id
     })));
   }
-  inline_keyboard.push([{text:"🏠 منوی اصلی",callback_data:"main:menu"}]);
+  inline_keyboard.push(...BACK_CLOSE);
   return {inline_keyboard};
 }
-async function sendWeatherMenu(env,chatId) {
-  return telegram(env,"sendMessage",{
-    chat_id:chatId,
-    text:"🌤 آب‌وهوای ۶ شهر منتخب گلستان\n\n👇 شهر موردنظر را انتخاب کن تا پیش‌بینی همان شهر نمایش داده شود.",
-    reply_markup:cityWeatherKeyboard()
-  });
+async function sendWeatherMenu(env,chatId,messageId=null) {
+  return renderMenu(env,chatId,
+    "🌤 آب‌وهوای ۶ شهر منتخب گلستان\n\n👇 شهر موردنظر را انتخاب کن تا پیش‌بینی همان شهر نمایش داده شود.",
+    cityWeatherKeyboard(),messageId);
 }
 async function singleCityWeather(env,cityId) {
   const city = GOLESTAN_CITIES.find(c=>c.id===cityId);
@@ -219,6 +288,7 @@ async function registerUser(env, chatId) {
   const item = {
     notifications_enabled: owner === String(chatId),
     created_at: new Date().toISOString(),
+    ui_version: 2,
   };
   await env.STATE.put(userKey(chatId), JSON.stringify(item), {
     metadata: {notifications_enabled: item.notifications_enabled}
@@ -282,52 +352,69 @@ async function deliverScheduledReport(env, chatId, owner, slot, message) {
   }
 }
 
+
 async function onCallbackQuery(query,env) {
-  if(!query || typeof query.data!=="string" || !query.id) return;
+  if(!query || typeof query.data!=="string" || !query.id)return;
   const chatId=String(query.message?.chat?.id||"");
-  if (!/^\d{1,20}$/.test(chatId) || query.message?.chat?.type !== "private" || String(query.from?.id) !== chatId) {
+  if(!/^\d{1,20}$/.test(chatId) || query.message?.chat?.type!=="private" || String(query.from?.id)!==chatId) {
     await telegram(env,"answerCallbackQuery",{callback_query_id:query.id,text:"درخواست نامعتبر است.",show_alert:true});
     return;
   }
+  try {await telegram(env,"answerCallbackQuery",{callback_query_id:query.id});}
+  catch(e){console.log("Telegram callback acknowledgement: "+String(e.message));}
   await registerUser(env,chatId);
-  try { await telegram(env,"answerCallbackQuery",{callback_query_id:query.id}); }
-  catch(e) { console.log("Telegram callback acknowledgement: "+String(e.message)); }
-  if(query.data==="main:menu") {
-    await send(env,chatId,welcome());
-  } else if (/^news:view:[0-9a-z]{8,12}:[01]$/.test(query.data)) {
-    const parts=query.data.split(":");
-    const snapshot=await readNewsView(env,parts[2]);
-    if (snapshot) await sendNewsSnapshotPage(env,chatId,snapshot,Number(parts[3]));
-    else await sendGolestanNews(env,chatId,false,0);
-  } else if (/^news:detail:[0-9a-z]{8,12}:[1-9a]$/.test(query.data)) {
-    const parts=query.data.split(":");
-    try { await sendNewsDetail(env,chatId,parts[2],parseInt(parts[3],36)); }
-    catch(e) { console.log("News detail delivery failed: "+String(e.message));
-      await send(env,chatId,"⚠️ نمایش جزئیات این خبر با مشکل مواجه شد. لطفاً دوباره دکمه اخبار را بزن.");
-    }
-  } else if(query.data==="news:page:1") {
-    await sendGolestanNews(env,chatId,false,1);
-  } else if(query.data==="news:page:0") {
-    await sendGolestanNews(env,chatId,false,0);
-  } else if(query.data==="news:refresh") {
-    await sendGolestanNews(env,chatId,true,0);
-  } else if(query.data==="weather:menu") {
-    await sendWeatherMenu(env,chatId);
-  } else if(/^weather:page:[0-3]$/.test(query.data)) {
-    // Compatibility with previously sent, four-page inline keyboards.
-    await sendWeatherMenu(env,chatId);
-  } else if(query.data.startsWith("weather:") && GOLESTAN_CITIES.some(city=>query.data==="weather:"+city.id)) {
-    const weatherText=await singleCityWeather(env,query.data.slice(8));
-    await telegram(env,"sendMessage",{chat_id:chatId,text:weatherText,reply_markup:{
-      inline_keyboard: [
-        [{text:"🔁 انتخاب شهر دیگر",callback_data:"weather:menu"}],
-        [{text:"🏠 بازگشت به منو",callback_data:"main:menu"}]
-      ]
-    }});
-  } else if(/^weather:[a-z][a-z0-9]{1,23}$/.test(query.data)) {
-    // Old Telegram messages may contain cities removed from the selection.
-    await sendWeatherMenu(env,chatId);
+  await removeLegacyKeyboardOnce(env,chatId);
+  const messageId=query.message?.message_id||null;
+  const action=query.data;
+  if(action==="main:menu"){
+    return showMainMenu(env,chatId,messageId);
   }
+  if(action==="menu:close"){
+    return renderMenu(env,chatId,
+      "✅ منو بسته شد. هر زمان خواستی، دستور /menu یا /start را بفرست.",
+      {inline_keyboard:[]},messageId);
+  }
+  if(action==="price:menu")return showPriceMenu(env,chatId,messageId);
+  if(["price:btc","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
+    const asset=action==="price:refresh"?"all":action.slice(6);
+    return renderMenu(env,chatId,priceViewText(await prices(),asset),priceResultKeyboard(),messageId);
+  }
+  if(action==="sources:show"){
+    return renderMenu(env,chatId,sourcesMessage(),simpleBackKeyboard(),messageId);
+  }
+  if(action==="support:show")return showSupport(env,chatId,messageId);
+  if(/^news:view:[0-9a-z]{8,12}:[01]$/.test(action)){
+    const parts=action.split(":");
+    const snapshot=await readNewsView(env,parts[2]);
+    return snapshot
+      ?sendNewsSnapshotPage(env,chatId,snapshot,Number(parts[3]),messageId)
+      :sendGolestanNews(env,chatId,false,0,messageId);
+  }
+  if(/^news:detail:[0-9a-z]{8,12}:[1-9a]$/.test(action)){
+    const parts=action.split(":");
+    try {return await sendNewsDetail(env,chatId,parts[2],parseInt(parts[3],36),messageId);}
+    catch(e){
+      console.log("News detail delivery failed: "+String(e.message));
+      return renderMenu(env,chatId,
+        "⚠️ نمایش جزئیات خبر ممکن نشد. لطفاً دوباره اخبار را باز کن.",
+        simpleBackKeyboard(),messageId);
+    }
+  }
+  if(action==="news:page:1")return sendGolestanNews(env,chatId,false,1,messageId);
+  if(action==="news:page:0")return sendGolestanNews(env,chatId,false,0,messageId);
+  if(action==="news:refresh")return sendGolestanNews(env,chatId,true,0,messageId);
+  if(action==="weather:menu" || /^weather:page:[0-3]$/.test(action))
+    return sendWeatherMenu(env,chatId,messageId);
+  if(action.startsWith("weather:") && GOLESTAN_CITIES.some(city=>action==="weather:"+city.id)){
+    const weatherText=await singleCityWeather(env,action.slice(8));
+    return renderMenu(env,chatId,weatherText,{inline_keyboard:[
+      [{text:"🔁 انتخاب شهر دیگر",callback_data:"weather:menu"}],
+      ...BACK_CLOSE
+    ]},messageId);
+  }
+  if(/^weather:[a-z][a-z0-9]{1,23}$/.test(action))
+    return sendWeatherMenu(env,chatId,messageId);
+  return showMainMenu(env,chatId,messageId);
 }
 async function onUpdate(update,env) {
   if(update.callback_query) return onCallbackQuery(update.callback_query,env);
@@ -670,7 +757,7 @@ async function readNewsView(env, id) {
 function makeNewsMessage(snapshot, page=0, viewId=null) {
   const fallbackKeyboard = [
     [{text:"🔄 بررسی دوباره خبرها", callback_data:"news:refresh"}],
-    [{text:"🏠 منوی اصلی", callback_data:"main:menu"}]
+    ...BACK_CLOSE
   ];
   if (!snapshot?.items?.length) {
     return {
@@ -684,7 +771,7 @@ function makeNewsMessage(snapshot, page=0, viewId=null) {
   if (!items.length) {
     return {text:"📰 خبر بیشتری موجود نیست.", inline_keyboard:[
       [{text:"⬅️ بازگشت به پنج خبر اول", callback_data:viewId ? "news:view:"+viewId+":0" : "news:page:0"}],
-      [{text:"🏠 منوی اصلی", callback_data:"main:menu"}]
+      ...BACK_CLOSE
     ]};
   }
   const lines = [
@@ -715,36 +802,31 @@ function makeNewsMessage(snapshot, page=0, viewId=null) {
     keyboard.push([{text:"⬅️ پنج خبر اول", callback_data:viewId ? "news:view:"+viewId+":0" : "news:page:0"}]);
   }
   keyboard.push([{text:"🔄 به‌روزرسانی خبرها", callback_data:"news:refresh"}]);
-  keyboard.push([{text:"🏠 منوی اصلی", callback_data:"main:menu"}]);
+  keyboard.push(...BACK_CLOSE);
   return {text:lines.join("\n").slice(0,3900), inline_keyboard:keyboard};
 }
-async function sendNewsSnapshotPage(env, chatId, snapshot, page=0) {
-  const viewId = await persistNewsView(env,snapshot);
-  const news = makeNewsMessage(snapshot,page,viewId);
-  return telegram(env, "sendMessage", {
-    chat_id:chatId, text:news.text, disable_web_page_preview:true,
-    reply_markup:{inline_keyboard:news.inline_keyboard}
-  });
+async function sendNewsSnapshotPage(env, chatId, snapshot, page=0, messageId=null) {
+  const viewId=await persistNewsView(env,snapshot);
+  const news=makeNewsMessage(snapshot,page,viewId);
+  return renderMenu(env,chatId,news.text,{inline_keyboard:news.inline_keyboard},messageId);
 }
-async function sendGolestanNews(env, chatId, force=false, page=0) {
-  return sendNewsSnapshotPage(env,chatId,await getGolestanNews(env,{force}),page);
+async function sendGolestanNews(env,chatId,force=false,page=0,messageId=null) {
+  return sendNewsSnapshotPage(env,chatId,await getGolestanNews(env,{force}),page,messageId);
 }
-async function sendNewsDetail(env, chatId, viewId, relativeIndex) {
+async function sendNewsDetail(env, chatId, viewId, relativeIndex, messageId=null) {
   const snapshot = await readNewsView(env,viewId);
   if (!snapshot) {
-    return telegram(env,"sendMessage",{
-      chat_id:chatId,
-      text:"⌛ این فهرست خبری منقضی شده است. برای دیدن خبرهای تازه، دکمه زیر را بزن.",
-      reply_markup:{inline_keyboard:[
+    return renderMenu(env,chatId,
+      "⌛ این فهرست خبری منقضی شده است. برای دیدن خبرهای تازه، دکمه زیر را بزن.",
+      {inline_keyboard:[
         [{text:"📰 تازه‌ترین خبرها",callback_data:"news:refresh"}],
-        [{text:"🏠 منوی اصلی",callback_data:"main:menu"}]
-      ]}
-    });
+        ...BACK_CLOSE
+      ]},messageId);
   }
   const absolute = relativeIndex - 1;
   const item = snapshot.items[absolute];
   if (!item || absolute < 0 || absolute >= 10) {
-    return sendNewsSnapshotPage(env,chatId,snapshot,0);
+    return sendNewsSnapshotPage(env,chatId,snapshot,0,messageId);
   }
   const page = absolute >= 5 ? 1 : 0;
   const number = absolute + 1;
@@ -762,12 +844,9 @@ async function sendNewsDetail(env, chatId, viewId, relativeIndex) {
   const keyboard = [];
   if (url) keyboard.push([{text:"📖 مطالعه خبر در سایت منبع",url}]);
   keyboard.push([{text:"⬅️ بازگشت به فهرست خبرها",callback_data:"news:view:"+viewId+":"+page}]);
-  keyboard.push([{text:"🏠 منوی اصلی",callback_data:"main:menu"}]);
-  return telegram(env,"sendMessage",{
-    chat_id:chatId,text:lines.join("\n").slice(0,3900),
-    disable_web_page_preview:true,
-    reply_markup:{inline_keyboard:keyboard}
-  });
+  keyboard.push(...BACK_CLOSE);
+  return renderMenu(env,chatId,lines.join("\n").slice(0,3900),
+    {inline_keyboard:keyboard},messageId);
 }
 
 
@@ -885,53 +964,55 @@ async function installWebhook(env) {
   });
   return "installed";
 }
+
 async function onTelegram(update, env) {
-  const m = update?.message;
-  if (!m || m.chat?.type !== "private" || typeof m.text !== "string") return;
-  const chatId = String(m.chat.id);
-  const line = m.text.trim();
-  const [rawCmd, maybePin] = line.split(/\s+/, 2);
-  const cmd = rawCmd.split("@")[0].toLowerCase();
-  const owner = await env.STATE.get("owner_chat_id");
+  const m=update?.message;
+  if(!m || m.chat?.type!=="private" || typeof m.text!=="string")return;
+  const chatId=String(m.chat.id);
+  const line=m.text.trim();
+  const [rawCmd,maybePin]=line.split(/\s+/,2);
+  const cmd=rawCmd.split("@")[0].toLowerCase();
+  const owner=await env.STATE.get("owner_chat_id");
+  if(cmd==="/start" && !owner && env.LINK_CODE && maybePin===env.LINK_CODE)
+    await env.STATE.put("owner_chat_id",chatId);
+  const user=await registerUser(env,chatId);
+  await removeLegacyKeyboardOnce(env,chatId);
 
-  // Only the verified PIN can initially link the administrative owner.
-  // Public membership never needs or changes the owner PIN.
-  if (cmd === "/start" && !owner && env.LINK_CODE && maybePin === env.LINK_CODE) {
-    await env.STATE.put("owner_chat_id", chatId);
+  if(cmd==="/start" || cmd==="/menu" || line==="🚀 شروع"){
+    return showMainMenu(env,chatId,null,
+      user.notifications_enabled?"🔔 اعلان قیمت فعال است.":"🔕 برای فعال‌سازی اعلان قیمت: /subscribe");
   }
-  const user = await registerUser(env, chatId);
-
-  if (cmd === "/start" || cmd === "/menu" || line === "🚀 شروع") {
-    await send(env, chatId, welcome() + "\n\n" + (user.notifications_enabled ? "🔔 اعلان قیمت شما فعال است." : "🔕 برای فعال‌سازی اعلان قیمت، /subscribe را بفرست."));
-  } else if (cmd === "/price" || cmd === "/now" || line === "💰 قیمت" || line === "📊 قیمت بازار") {
-    await send(env, chatId, report(await prices()));
-  } else if (cmd === "/weather" || line === "🌤 آب و هوا" || line === "🌤 هواشناسی") {
-    await sendWeatherMenu(env,chatId);
-  } else if (cmd === "/sources" || line === "📚 منابع" || line === "📚 منابع اطلاعات") {
-    await send(env,chatId,sourcesMessage());
-  } else if (cmd === "/news" || line === "📰 اخبار") {
-    await sendGolestanNews(env,chatId,true,0);
-  } else if (cmd === "/support" || line === "💬 پشتیبان") {
-    await telegram(env, "sendMessage", {
-      chat_id: chatId,
-      text: "💬 ارتباط با پشتیبان رصدینو\nبرای شروع گفتگوی خصوصی با مدیر، دکمه زیر را بزن یا به @hamidhosseinis پیام بده.",
-      disable_web_page_preview: true,
-      reply_markup: {inline_keyboard: [[{text: "💬 شروع گفتگو با پشتیبان", url: "https://t.me/hamidhosseinis"}]]}
-    });
-  } else if (cmd === "/status" || line === "🔔 اعلان‌های من") {
-    await send(env, chatId, (user.notifications_enabled ? "🔔 اعلان قیمت فعال است." : "🔕 اعلان قیمت غیرفعال است.") +
-      "\n🕙 زمان‌بندی: ۱۰ صبح و ۱۰ شب به وقت ایران.\nفعال‌سازی: /subscribe\nغیرفعال‌سازی: /stop");
-  } else if (cmd === "/subscribe") {
+  if(cmd==="/price" || cmd==="/now" || line==="💰 قیمت" || line==="📊 قیمت بازار")
+    return send(env,chatId,report(await prices()),priceResultKeyboard());
+  if(cmd==="/weather" || line==="🌤 آب و هوا" || line==="🌤 هواشناسی")
+    return sendWeatherMenu(env,chatId);
+  if(cmd==="/sources" || line==="📚 منابع" || line==="📚 منابع اطلاعات")
+    return send(env,chatId,sourcesMessage(),simpleBackKeyboard());
+  if(cmd==="/news" || line==="📰 اخبار")
+    return sendGolestanNews(env,chatId,true,0);
+  if(cmd==="/support" || line==="💬 پشتیبان")
+    return showSupport(env,chatId);
+  if(cmd==="/status" || line==="🔔 اعلان‌های من")
+    return send(env,chatId,(user.notifications_enabled?"🔔 اعلان قیمت فعال است.":"🔕 اعلان قیمت غیرفعال است.")+
+      "\n🕙 زمان‌بندی: ۱۰ صبح و ۱۰ شب به وقت ایران.\nفعال‌سازی: /subscribe\nغیرفعال‌سازی: /stop",
+      simpleBackKeyboard());
+  if(cmd==="/subscribe"){
     await setUserNotifications(env,chatId,true);
-    await send(env,chatId,"✅ اعلان قیمت برای حساب شما فعال شد.\n🕙 هر روز ساعت ۱۰ صبح و ۱۰ شب به وقت ایران.\nبرای توقف: /stop");
-  } else if (cmd === "/help" || line === "ℹ️ راهنما") {
-    await send(env, chatId, "📖 راهنمای رصدینو\n🚀 شروع: نمایش منو و معرفی\n💰 قیمت: گزارش بازار\n🌤 آب و هوا: هوای امروز و فردای ۶ شهر منتخب گلستان\n📚 منابع: مراجع قیمت‌ها و هواشناسی\n📰 اخبار: آخرین تیترهای استان گلستان و لینک منابع\n💬 پشتیبان: گفتگو با @hamidhosseinis\n\nاعلان قیمت اختیاری است و برای هر کاربر جدا تنظیم می‌شود.\nدستورات: /start /price /weather /sources /news /support /subscribe /status /stop");
-  } else if (cmd === "/stop") {
-    await setUserNotifications(env,chatId,false);
-    await send(env,chatId,"⏸ اعلان‌های زمان‌بندی‌شده فقط برای حساب شما متوقف شد.\nبرای دریافت دوباره: /subscribe\nاستفاده از قیمت، هواشناسی و اخبار همچنان فعال است.");
-  } else {
-    await send(env, chatId, "👇 یکی از پنج دکمه ثابت پایین صفحه را انتخاب کن.");
+    return send(env,chatId,
+      "✅ اعلان قیمت برای حساب شما فعال شد.\n🕙 هر روز ساعت ۱۰ صبح و ۱۰ شب به وقت ایران.\nبرای توقف: /stop",
+      simpleBackKeyboard());
   }
+  if(cmd==="/help" || line==="ℹ️ راهنما")
+    return send(env,chatId,
+      "📖 راهنمای رصدینو\n💰 قیمت‌ها: نرخ بیت‌کوین، تتر و طلای ۱۸ عیار\n🌤 آب‌وهوا: پیش‌بینی شش شهر گلستان\n📚 منابع: مراجع قیمت و هواشناسی\n📰 اخبار: تیترها و جزئیات ۴۸ ساعت اخیر گلستان\n💬 پشتیبانی: گفتگو با @hamidhosseinis\n\nبازکردن منو: /menu\nاعلان قیمت اختیاری و شخصی است.\nدستورات: /start /menu /price /weather /sources /news /support /subscribe /status /stop",
+      simpleBackKeyboard());
+  if(cmd==="/stop"){
+    await setUserNotifications(env,chatId,false);
+    return send(env,chatId,
+      "⏸ اعلان‌های زمان‌بندی‌شده فقط برای حساب شما متوقف شد.\nبرای دریافت دوباره: /subscribe\nقیمت، هواشناسی و اخبار همچنان فعال است.",
+      simpleBackKeyboard());
+  }
+  return showMainMenu(env,chatId,null,"👇 از دکمه‌های زیر استفاده کن.");
 }
 
 export default {

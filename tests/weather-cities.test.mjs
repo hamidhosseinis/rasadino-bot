@@ -95,9 +95,10 @@ test("Only the six selected Golestan cities remain, with unique IDs and valid co
 });
 test("Weather has exactly three two-city rows, main menu and no page controls",()=>{
   const rows=cityWeatherKeyboard().inline_keyboard;
-  assert.deepEqual(rows.map(r=>r.length),[2,2,2,1]);
+  assert.deepEqual(rows.map(r=>r.length),[2,2,2,2]);
   assert.deepEqual(rows.slice(0,3).flat().map(b=>b.callback_data),GOLESTAN_CITIES.map(c=>"weather:"+c.id));
   assert.equal(rows.at(-1)[0].callback_data,"main:menu");
+  assert.equal(rows.at(-1)[1].callback_data,"menu:close");
   for(const button of rows.flat())assert.ok(Buffer.byteLength(button.callback_data,"utf8")<=64);
   assert.ok(!rows.flat().some(b=>b.callback_data.includes("weather:page:")));
 });
@@ -130,7 +131,8 @@ test("Sources button explains all current price and weather sources, without fet
   const {telegram,weather,price}=stubFetch(t);
   const e=env();
   assert.equal((await update(e,"/start",1100)).status,200);
-  assert.ok(lastSent(telegram).reply_markup.keyboard.flat().some(b=>b.text==="📚 منابع"));
+  assert.ok(lastSent(telegram).reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="sources:show"));
+  assert.equal(lastSent(telegram).reply_markup.keyboard,undefined);
   assert.equal((await update(e,"📚 منابع",1101)).status,200);
   const msg=lastSent(telegram);
   assert.match(msg.text,/📚 منابع اطلاعات رصدینو/);
