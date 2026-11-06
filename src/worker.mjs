@@ -64,14 +64,16 @@ async function renderMenu(env, chatId, text, replyMarkup, messageId = null) {
   return send(env,chatId,text,replyMarkup);
 }
 async function removeLegacyKeyboardOnce(env,chatId) {
-  const key="ui:inline_v1:"+chatId;
-  if(await env.STATE.get(key))return;
+  const user=await readUser(env,chatId);
+  if(!user || user.ui_version===2)return;
   await telegram(env,"sendMessage",{
     chat_id:chatId,
     text:"✅ منوی ثابت قدیمی پایین صفحه بسته شد. از این پس دکمه‌ها زیر پیام‌های رصدینو قرار دارند.",
     reply_markup:{remove_keyboard:true}
   });
-  await env.STATE.put(key,"1");
+  await env.STATE.put(userKey(chatId),JSON.stringify({...user,ui_version:2}),{
+    metadata:{notifications_enabled:user.notifications_enabled}
+  });
 }
 function priceViewText(pr,asset="all") {
   const names = {
@@ -286,6 +288,7 @@ async function registerUser(env, chatId) {
   const item = {
     notifications_enabled: owner === String(chatId),
     created_at: new Date().toISOString(),
+    ui_version: 2,
   };
   await env.STATE.put(userKey(chatId), JSON.stringify(item), {
     metadata: {notifications_enabled: item.notifications_enabled}
@@ -359,9 +362,8 @@ async function onCallbackQuery(query,env) {
   }
   try {await telegram(env,"answerCallbackQuery",{callback_query_id:query.id});}
   catch(e){console.log("Telegram callback acknowledgement: "+String(e.message));}
-  const previous=await readUser(env,chatId);
   await registerUser(env,chatId);
-  if(previous)await removeLegacyKeyboardOnce(env,chatId);
+  await removeLegacyKeyboardOnce(env,chatId);
   const messageId=query.message?.message_id||null;
   const action=query.data;
   if(action==="main:menu"){
@@ -973,9 +975,8 @@ async function onTelegram(update, env) {
   const owner=await env.STATE.get("owner_chat_id");
   if(cmd==="/start" && !owner && env.LINK_CODE && maybePin===env.LINK_CODE)
     await env.STATE.put("owner_chat_id",chatId);
-  const previous=await readUser(env,chatId);
   const user=await registerUser(env,chatId);
-  if(previous)await removeLegacyKeyboardOnce(env,chatId);
+  await removeLegacyKeyboardOnce(env,chatId);
 
   if(cmd==="/start" || cmd==="/menu" || line==="🚀 شروع"){
     return showMainMenu(env,chatId,null,
