@@ -94,7 +94,9 @@ function tehranHour(date) {
  */
 function upcomingWeatherHours(hourly, now=Date.now()) {
   if(!hourly || !Array.isArray(hourly.time)) return [];
-  const baseline = Math.floor(now / 3600000) * 3600000;
+  // Tehran is UTC+03:30 (no current daylight saving time). Align with local hourly forecast timestamps.
+  const tehranOffset = 210 * 60 * 1000;
+  const baseline = Math.floor((now + tehranOffset) / 3600000) * 3600000 - tehranOffset;
   const end = baseline + WEATHER_HOURS * 3600000;
   const hours = [];
   for(let i=0;i<hourly.time.length;i++) {
