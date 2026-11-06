@@ -128,7 +128,7 @@ test("Sources button explains all current price and weather sources, without fet
     "https://www.tgju.org/profile/geram18","https://www.tgju.org/profile/crypto-tether"
   ])assert.ok(msg.text.includes(link),link);
   assert.match(msg.text,/جایگزین/);
-  assert.match(msg.text,/علی/ ? /۶ شهر/ : /۶ شهر/);
+  assert.match(msg.text,/۶ شهر/);
   assert.equal(weather.length,0);
   assert.equal(price.length,0);
   assert.equal((await update(e,"/sources",1102)).status,200);
