@@ -44,12 +44,45 @@ function welcome() {
   ].join("\n");
 }
 
-/* Rasadino weather v1: independent of other projects; public Open-Meteo model data. */
+/* Rasadino weather: 37 Golestan cities, coordinates are city-center approximations. */
 const GOLESTAN_CITIES = Object.freeze([
   {id:"gorgan", name:"گرگان", latitude:36.84270, longitude:54.44391},
   {id:"aqqala", name:"آق‌قلا", latitude:37.01390, longitude:54.45504},
   {id:"kordkuy", name:"کردکوی", latitude:36.79307, longitude:54.11214},
-  {id:"aliabad", name:"علی‌آباد کتول", latitude:36.91011, longitude:54.86737}
+  {id:"aliabad", name:"علی‌آباد کتول", latitude:36.91011, longitude:54.86737},
+  {id:"bandargaz", name:"بندرگز", latitude:36.77200, longitude:53.94810},
+  {id:"nowkandeh", name:"نوکنده", latitude:36.74000, longitude:53.90950},
+  {id:"bandartorkaman", name:"بندرترکمن", latitude:36.90120, longitude:54.07200},
+  {id:"sijval", name:"سیجوال", latitude:36.88789, longitude:54.11594},
+  {id:"fazelabad", name:"فاضل‌آباد", latitude:36.89833, longitude:54.74972},
+  {id:"mazraeh", name:"مزرعه", latitude:36.95426, longitude:54.85626},
+  {id:"sangdevin", name:"سنگدوین", latitude:36.99916, longitude:54.85776},
+  {id:"jelin", name:"جلین", latitude:36.85030, longitude:54.53510},
+  {id:"sarkhonkalateh", name:"سرخنکلاته", latitude:36.89250, longitude:54.56910},
+  {id:"qoroq", name:"قرق", latitude:36.89222, longitude:54.71750},
+  {id:"gonbad", name:"گنبدکاووس", latitude:37.24930, longitude:55.16590},
+  {id:"incheboron", name:"اینچه‌برون", latitude:37.45530, longitude:54.71830},
+  {id:"karand", name:"کرند", latitude:37.96033, longitude:55.51560},
+  {id:"minudasht", name:"مینودشت", latitude:37.22890, longitude:55.37470},
+  {id:"doozin", name:"دوزین", latitude:37.12758, longitude:55.57516},
+  {id:"alghajar", name:"القجر", latitude:37.21314, longitude:55.34249},
+  {id:"anbarolum", name:"انبارآلوم", latitude:37.13710, longitude:54.61900},
+  {id:"kalaleh", name:"کلاله", latitude:37.37570, longitude:55.49330},
+  {id:"faraghi", name:"فراغی", latitude:37.52701, longitude:55.59419},
+  {id:"azadshahr", name:"آزادشهر", latitude:37.08750, longitude:55.17260},
+  {id:"nowdehkhanduz", name:"نوده خاندوز", latitude:37.07640, longitude:55.26250},
+  {id:"neginshahr", name:"نگین‌شهر", latitude:37.13920, longitude:55.16390},
+  {id:"khanbebin", name:"خان‌ببین", latitude:37.01250, longitude:54.98580},
+  {id:"ramian", name:"رامیان", latitude:37.01500, longitude:55.14240},
+  {id:"daland", name:"دلند", latitude:37.03550, longitude:55.04920},
+  {id:"tatarolia", name:"تاتار علیا", latitude:37.11610, longitude:55.04830},
+  {id:"maraveh", name:"مراوه‌تپه", latitude:37.90430, longitude:55.95490},
+  {id:"gelidagh", name:"گلیداغ", latitude:37.64484, longitude:55.94470},
+  {id:"gomishtepe", name:"گمیش‌تپه", latitude:37.07010, longitude:54.07700},
+  {id:"siminshahr", name:"سیمین‌شهر", latitude:37.01130, longitude:54.23170},
+  {id:"yanghagh", name:"ینقاق", latitude:37.29735, longitude:55.36841},
+  {id:"galikesh", name:"گالیکش", latitude:37.27190, longitude:55.43250},
+  {id:"sadeghabad", name:"صادق‌آباد", latitude:37.37556, longitude:55.67444}
 ]);
 function weatherDescription(code) {
   const descriptions = {
@@ -104,14 +137,14 @@ async function getWeatherReport(env) {
     const cached = await env.STATE.get(cacheKey);
     if(cached) return cached;
   }catch(e){ console.log("Weather KV read skipped: "+String(e)); }
-  const results = await Promise.all(GOLESTAN_CITIES.map(async city=>{
+  const results = await Promise.all(GOLESTAN_CITIES.slice(0,4).map(async city=>{
     try { return await fetchCityForecast(city); }
     catch(e) { console.log("Weather fetch "+city.id+": "+String(e)); return {city:city.name,error:true}; }
   }));
   const stamp = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
     timeZone:"Asia/Tehran",dateStyle:"medium",timeStyle:"short"
   }).format(new Date());
-  const rows = ["🌤 هواشناسی چهار شهر استان گلستان","🗓 "+stamp,""];
+  const rows = ["🌤 هواشناسی چهار شهر منتخب استان گلستان","🗓 "+stamp,""];
   for(const data of results){
     rows.push("📍 "+data.city);
     if(data.error){
@@ -140,18 +173,31 @@ async function getWeatherReport(env) {
 }
 
 
-const CITY_KEYBOARD = {
-  inline_keyboard: [
-    [{text:"🌤 گرگان",callback_data:"weather:gorgan"},{text:"🌤 آق‌قلا",callback_data:"weather:aqqala"}],
-    [{text:"🌤 کردکوی",callback_data:"weather:kordkuy"},{text:"🌤 علی‌آباد کتول",callback_data:"weather:aliabad"}],
-    [{text:"🏠 منوی اصلی",callback_data:"main:menu"}]
-  ]
-};
-async function sendWeatherMenu(env,chatId) {
+const WEATHER_PAGE_SIZE = 10;
+function cityWeatherKeyboard(page = 0) {
+  const pageCount = Math.ceil(GOLESTAN_CITIES.length / WEATHER_PAGE_SIZE);
+  const selected = Number.isInteger(page) ? Math.max(0, Math.min(page, pageCount-1)) : 0;
+  const cities = GOLESTAN_CITIES.slice(selected*WEATHER_PAGE_SIZE, (selected+1)*WEATHER_PAGE_SIZE);
+  const inline_keyboard = [];
+  for (let i=0; i<cities.length; i+=2) {
+    inline_keyboard.push(cities.slice(i,i+2).map(city=>({
+      text:"🌤 "+city.name, callback_data:"weather:"+city.id
+    })));
+  }
+  const navigation=[];
+  if(selected>0) navigation.push({text:"⬅️ قبلی",callback_data:"weather:page:"+(selected-1)});
+  if(selected<pageCount-1) navigation.push({text:"بعدی ➡️",callback_data:"weather:page:"+(selected+1)});
+  if(navigation.length) inline_keyboard.push(navigation);
+  inline_keyboard.push([{text:"🏠 منوی اصلی",callback_data:"main:menu"}]);
+  return {inline_keyboard};
+}
+async function sendWeatherMenu(env,chatId,page=0) {
+  const pageCount=Math.ceil(GOLESTAN_CITIES.length/WEATHER_PAGE_SIZE);
+  const selected=Number.isInteger(page)?Math.max(0,Math.min(page,pageCount-1)):0;
   return telegram(env,"sendMessage",{
     chat_id:chatId,
-    text:"🌤 آب‌وهوای استان گلستان\n\n👇 شهر موردنظر را انتخاب کن تا فقط پیش‌بینی همان شهر نمایش داده شود.",
-    reply_markup:CITY_KEYBOARD
+    text:"🌤 آب‌وهوای ۳۷ شهر استان گلستان\\n\\n👇 شهر موردنظر را انتخاب کن تا فقط پیش‌بینی همان شهر نمایش داده شود.\\n📄 صفحه "+weatherNumber(selected+1)+" از "+weatherNumber(pageCount),
+    reply_markup:cityWeatherKeyboard(selected)
   });
 }
 async function singleCityWeather(env,cityId) {
@@ -308,11 +354,13 @@ async function onCallbackQuery(query,env) {
     await sendGolestanNews(env,chatId,true,0);
   } else if(query.data==="weather:menu") {
     await sendWeatherMenu(env,chatId);
-  } else if(/^weather:(gorgan|aqqala|kordkuy|aliabad)$/.test(query.data)) {
+  } else if(/^weather:page:[0-3]$/.test(query.data)) {
+    await sendWeatherMenu(env,chatId,Number(query.data.slice(13)));
+  } else if(query.data.startsWith("weather:") && GOLESTAN_CITIES.some(city=>query.data==="weather:"+city.id)) {
     const weatherText=await singleCityWeather(env,query.data.slice(8));
     await telegram(env,"sendMessage",{chat_id:chatId,text:weatherText,reply_markup:{
       inline_keyboard: [
-        [{text:"🔁 انتخاب شهر دیگر",callback_data:"weather:menu"}],
+        [{text:"🔁 انتخاب شهر دیگر",callback_data:"weather:page:"+Math.floor(GOLESTAN_CITIES.findIndex(city=>query.data==="weather:"+city.id)/WEATHER_PAGE_SIZE)}],
         [{text:"🏠 بازگشت به منو",callback_data:"main:menu"}]
       ]
     }});
@@ -890,7 +938,7 @@ async function onTelegram(update, env) {
     await setUserNotifications(env,chatId,true);
     await send(env,chatId,"✅ اعلان قیمت برای حساب شما فعال شد.\n🕙 هر روز ساعت ۱۰ صبح و ۱۰ شب به وقت ایران.\nبرای توقف: /stop");
   } else if (cmd === "/help" || line === "ℹ️ راهنما") {
-    await send(env, chatId, "📖 راهنمای رصدینو\n🚀 شروع: نمایش منو و معرفی\n💰 قیمت: گزارش بازار\n🌤 آب و هوا: هوای امروز و فردای چهار شهر گلستان\n📰 اخبار: آخرین تیترهای استان گلستان و لینک منابع\n💬 پشتیبان: گفتگو با @hamidhosseinis\n\nاعلان قیمت اختیاری است و برای هر کاربر جدا تنظیم می‌شود.\nدستورات: /start /price /weather /news /support /subscribe /status /stop");
+    await send(env, chatId, "📖 راهنمای رصدینو\n🚀 شروع: نمایش منو و معرفی\n💰 قیمت: گزارش بازار\n🌤 آب و هوا: هوای امروز و فردای ۳۷ شهر گلستان\n📰 اخبار: آخرین تیترهای استان گلستان و لینک منابع\n💬 پشتیبان: گفتگو با @hamidhosseinis\n\nاعلان قیمت اختیاری است و برای هر کاربر جدا تنظیم می‌شود.\nدستورات: /start /price /weather /news /support /subscribe /status /stop");
   } else if (cmd === "/stop") {
     await setUserNotifications(env,chatId,false);
     await send(env,chatId,"⏸ اعلان‌های زمان‌بندی‌شده فقط برای حساب شما متوقف شد.\nبرای دریافت دوباره: /subscribe\nاستفاده از قیمت، هواشناسی و اخبار همچنان فعال است.");
@@ -966,4 +1014,4 @@ export default {
 };
 
 // Export narrow testable helpers; HTTP access still requires the verified webhook.
-export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport};
+export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard};
