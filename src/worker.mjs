@@ -36,7 +36,7 @@ function welcome() {
     "👋 به رصدینو | Rasadino خوش آمدی!",
     "",
     "📡 رصدینو دستیار هوشمند رصد اطلاعات و اعلان‌هاست.",
-    "💰 با دکمه «قیمت» نرخ بیت‌کوین، تتر و طلای ۱۸ عیار و فهرست کالاهای مصرفی را ببین.",
+    "💰 با دکمه «قیمت» نرخ بیت‌کوین، تتر و طلای ۱۸ عیار را ببین.",
     "🕙 گزارش خودکار بازار ساعت ۱۰ صبح و ۱۰ شب، فقط برای کاربران دارای اشتراک اعلان ارسال می‌شود.",
     "🌤 آب و هوای ۶ شهر منتخب و 📰 اخبار استان گلستان آماده‌اند.",
     "📚 برای دیدن منابع قیمت و هواشناسی، دکمه «منابع» را بزن.",
@@ -294,12 +294,6 @@ async function onCallbackQuery(query,env) {
   catch(e) { console.log("Telegram callback acknowledgement: "+String(e.message)); }
   if(query.data==="main:menu") {
     await send(env,chatId,welcome());
-  } else if(query.data==="prices:goods") {
-    await sendConsumerPrices(env,chatId);
-  } else if(query.data==="prices:markets") {
-    await sendMarketPrice(env,chatId);
-  } else if(query.data==="prices:sources") {
-    await send(env,chatId,await sourcesMessage(env));
   } else if (/^news:view:[0-9a-z]{8,12}:[01]$/.test(query.data)) {
     const parts=query.data.split(":");
     const snapshot=await readNewsView(env,parts[2]);
@@ -830,80 +824,6 @@ async function quote(task) {
   try { return await task(); }
   catch (e) { console.log("Quote unavailable: " + String(e.message)); return {value: null, source: "unavailable"}; }
 }
-
-/* Consumer-item prices are editor-entered quotes with explicit provenance.
- * No exchange-rate feeds or shop HTML are repurposed as live item prices. */
-const CONSUMER_GOODS = Object.freeze([
-  {id:"saghe", name:"🍪 بیسکویت ساقه طلایی", hours:168},
-  {id:"bread", name:"🥖 نان (نوع مشخص نشده)", hours:24},
-  {id:"banana", name:"🍌 موز (هر کیلوگرم)", hours:24},
-  {id:"codex12", name:"📦 کاندوم کدکس ۱۲ عددی (مدل مشخص نشده)", hours:168}
-]);
-function goodDefinition(id){return CONSUMER_GOODS.find(g=>g.id===id);}
-function goodKey(id){return "good:quote:v1:"+id;}
-function parsedGood(item,raw,now=Date.now()){
-  if(!raw)return null;
-  try {
-    const p=JSON.parse(raw);
-    const timestamp=Date.parse(p.updatedAt);
-    if(!Number.isSafeInteger(p.toman)||p.toman<=0||p.toman>1000000000||
-       typeof p.spec!=="string"||!p.spec.trim()||p.spec.length>100||
-       typeof p.url!=="string"||!/^https:\/\/[^\s]+$/i.test(p.url)||
-       !Number.isFinite(timestamp)||timestamp>now+900000||now-timestamp>item.hours*3600000)return null;
-    return p;
-  }catch(_){return null;}
-}
-async function goodQuotes(env){
-  return Promise.all(CONSUMER_GOODS.map(async item=>{
-    const raw=await env.STATE.get(goodKey(item.id));
-    return {item,price:parsedGood(item,raw)};
-  }));
-}
-function consumerGoodsText(rows) {
-  const stamp= new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
-    timeZone:TIMEZONE,dateStyle:"medium",timeStyle:"short"
-  });
-  return [
-    "🛒 قیمت کالاهای مصرفی",
-    "",
-    ...rows.map(({item,price})=>price
-      ? item.name+"\n"+price.spec+": "+new Intl.NumberFormat("fa-IR").format(price.toman)+" تومان"+
-        "\nآخرین ثبت: "+stamp.format(new Date(price.updatedAt))
-      : item.name+"\nقیمت تأییدشده و به‌روز در دسترس نیست."),
-    "",
-    "ℹ️ نرخ‌های این بخش دستی ثبت می‌شوند، قیمت لحظه‌ای بازار نیستند؛ نوع و وزن کالا را با مشخصات ثبت‌شده تطبیق بده.",
-    "📚 نشانی منابع فقط از دکمه «منابع» قابل مشاهده است."
-  ].join("\n\n");
-}
-function priceInlineKeyboard(){
-  return {inline_keyboard:[
-    [{text:"🛒 قیمت کالاهای مصرفی",callback_data:"prices:goods"}],
-    [{text:"📚 منابع",callback_data:"prices:sources"}]
-  ]};
-}
-async function sendMarketPrice(env,chatId){
-  return telegram(env,"sendMessage",{chat_id:chatId,text:report(await prices()),
-    disable_web_page_preview:true,reply_markup:priceInlineKeyboard()});
-}
-async function sendConsumerPrices(env,chatId){
-  return telegram(env,"sendMessage",{chat_id:chatId,text:consumerGoodsText(await goodQuotes(env)),
-    disable_web_page_preview:true,reply_markup:{inline_keyboard:[
-      [{text:"🔁 به‌روزرسانی",callback_data:"prices:goods"}],
-      [{text:"💰 نرخ بیت‌کوین، تتر و طلا",callback_data:"prices:markets"}],
-      [{text:"📚 منابع",callback_data:"prices:sources"}]
-    ]}});
-}
-function goodUpdateFromCommand(line){
-  const m=line.match(/^\/setgood(?:@\w+)?\s+(saghe|bread|banana|codex12)\s+([0-9]{1,10})\s*\|\s*([^|\r\n]{4,100})\s*\|\s*(https:\/\/[^\s|]{5,400})\s*$/i);
-  if(!m)return null;
-  const toman=Number(m[2]);const spec=m[3].trim();let url;
-  try {url=new URL(m[4]);}
-  catch(_){return null;}
-  if(!Number.isSafeInteger(toman)||toman<=0||toman>1000000000||url.protocol!=="https:"||
-     url.username||url.password||!url.hostname.includes(".")||spec.length<4)return null;
-  return {id:m[1].toLowerCase(),toman,spec,url:url.href,updatedAt:new Date().toISOString()};
-}
-
 async function prices() {
   const [btc, usdt, gold] = await Promise.all([
     quote(btcPrice),
@@ -931,9 +851,7 @@ function report(pr) {
     "نرخ‌ها بر اساس آخرین اطلاعات قابل دریافت‌اند؛ در تعطیلی یا اختلال ممکن است به‌روز نباشند."
   ].join("\n");
 }
-async function sourcesMessage(env) {
-  const rows=await goodQuotes(env);
-  const itemSources=rows.filter(r=>r.price).flatMap(r=>[r.item.name+" — "+r.price.spec,r.price.url,""]);
+function sourcesMessage() {
   return [
     "📚 منابع اطلاعات رصدینو",
     "",
@@ -953,8 +871,6 @@ async function sourcesMessage(env) {
     "🥇 طلای ۱۸ عیار (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
     GOLD_URL,
     "",
-    "🛒 کالاهای مصرفی (قیمت‌های دستیِ دارای تاریخ ثبت)",
-    ...(itemSources.length ? itemSources : ["برای این اقلام فعلاً نرخ تازه و منبع قابل اعلام ثبت نشده است.",""]),
     "ℹ️ قیمت‌ها و پیش‌بینی‌ها وابسته به دسترسی و زمان به‌روزرسانی سرویس‌های بالا هستند؛ برای تصمیم‌های حساس، داده‌ها را با منبع اصلی تطبیق بده."
   ].join("\n");
 }
@@ -988,31 +904,11 @@ async function onTelegram(update, env) {
   if (cmd === "/start" || cmd === "/menu" || line === "🚀 شروع") {
     await send(env, chatId, welcome() + "\n\n" + (user.notifications_enabled ? "🔔 اعلان قیمت شما فعال است." : "🔕 برای فعال‌سازی اعلان قیمت، /subscribe را بفرست."));
   } else if (cmd === "/price" || cmd === "/now" || line === "💰 قیمت" || line === "📊 قیمت بازار") {
-    await sendMarketPrice(env,chatId);
-  } else if(cmd === "/goods" || line === "🛒 قیمت کالاهای مصرفی") {
-    await sendConsumerPrices(env,chatId);
-  } else if(cmd === "/setgood") {
-    if(!owner || owner!==chatId) {
-      await send(env,chatId,"⛔ ویرایش قیمت کالاها تنها برای مدیر تأییدشده مجاز است.");
-    } else {
-      const newQuote=goodUpdateFromCommand(line);
-      if(!newQuote)await send(env,chatId,"فرمت: /setgood bread 25000 | نان بربری یک عدد | https://example.com/source\nشناسه‌ها: saghe, bread, banana, codex12");
-      else {
-        await env.STATE.put(goodKey(newQuote.id),JSON.stringify(newQuote));
-        await send(env,chatId,"✅ نرخ کالا ثبت شد؛ در فهرست مصرفی و بخش منابع قابل مشاهده است.");
-      }
-    }
-  } else if(cmd === "/cleargood") {
-    if(!owner || owner!==chatId) await send(env,chatId,"⛔ ویرایش قیمت کالاها تنها برای مدیر تأییدشده مجاز است.");
-    else {
-      const id=line.split(/\s+/)[1];
-      if(!goodDefinition(id)) await send(env,chatId,"شناسه معتبر نیست: saghe, bread, banana, codex12");
-      else {await env.STATE.delete(goodKey(id));await send(env,chatId,"✅ قیمت قبلی حذف شد.");}
-    }
+    await send(env, chatId, report(await prices()));
   } else if (cmd === "/weather" || line === "🌤 آب و هوا" || line === "🌤 هواشناسی") {
     await sendWeatherMenu(env,chatId);
   } else if (cmd === "/sources" || line === "📚 منابع" || line === "📚 منابع اطلاعات") {
-    await send(env,chatId,await sourcesMessage(env));
+    await send(env,chatId,sourcesMessage());
   } else if (cmd === "/news" || line === "📰 اخبار") {
     await sendGolestanNews(env,chatId,true,0);
   } else if (cmd === "/support" || line === "💬 پشتیبان") {
@@ -1029,7 +925,7 @@ async function onTelegram(update, env) {
     await setUserNotifications(env,chatId,true);
     await send(env,chatId,"✅ اعلان قیمت برای حساب شما فعال شد.\n🕙 هر روز ساعت ۱۰ صبح و ۱۰ شب به وقت ایران.\nبرای توقف: /stop");
   } else if (cmd === "/help" || line === "ℹ️ راهنما") {
-    await send(env, chatId, "📖 راهنمای رصدینو\n🚀 شروع: نمایش منو و معرفی\n💰 قیمت: گزارش بازار و کالاهای مصرفی\n🌤 آب و هوا: هوای امروز و فردای ۶ شهر منتخب گلستان\n📚 منابع: مراجع قیمت‌ها و هواشناسی\n📰 اخبار: آخرین تیترهای استان گلستان و لینک منابع\n💬 پشتیبان: گفتگو با @hamidhosseinis\n\nاعلان قیمت اختیاری است و برای هر کاربر جدا تنظیم می‌شود.\nدستورات: /start /price /goods /weather /sources /news /support /subscribe /status /stop");
+    await send(env, chatId, "📖 راهنمای رصدینو\n🚀 شروع: نمایش منو و معرفی\n💰 قیمت: گزارش بازار\n🌤 آب و هوا: هوای امروز و فردای ۶ شهر منتخب گلستان\n📚 منابع: مراجع قیمت‌ها و هواشناسی\n📰 اخبار: آخرین تیترهای استان گلستان و لینک منابع\n💬 پشتیبان: گفتگو با @hamidhosseinis\n\nاعلان قیمت اختیاری است و برای هر کاربر جدا تنظیم می‌شود.\nدستورات: /start /price /weather /sources /news /support /subscribe /status /stop");
   } else if (cmd === "/stop") {
     await setUserNotifications(env,chatId,false);
     await send(env,chatId,"⏸ اعلان‌های زمان‌بندی‌شده فقط برای حساب شما متوقف شد.\nبرای دریافت دوباره: /subscribe\nاستفاده از قیمت، هواشناسی و اخبار همچنان فعال است.");
