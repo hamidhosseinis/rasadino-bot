@@ -36,7 +36,7 @@ function welcome() {
     "",
     "📡 رصدینو دستیار هوشمند رصد اطلاعات و اعلان‌هاست.",
     "💰 با دکمه «قیمت» نرخ بیت‌کوین، تتر و طلای ۱۸ عیار را ببین.",
-    "🕙 گزارش خودکار بازار هر روز ساعت ۱۰ صبح و ۱۰ شب به وقت ایران ارسال می‌شود.",
+    "🕙 گزارش خودکار بازار ساعت ۱۰ صبح و ۱۰ شب، فقط برای کاربران دارای اشتراک اعلان ارسال می‌شود.",
     "🌤 آب و هوای انتخابی و 📰 اخبار استان گلستان آماده‌اند.",
     "💬 برای ارتباط با مدیر، دکمه «پشتیبان» را انتخاب کن.",
     "",
@@ -189,14 +189,102 @@ async function singleCityWeather(env,cityId) {
     "منبع: Open-Meteo | پیش‌بینی برای مختصات مرکز شهر"
   ].join("\n");
 }
+
+/* Public user registry. Store only the Telegram chat ID (as KV key) and opt-in state. */
+const USER_PREFIX = "user:";
+function userKey(chatId) {
+  const id = String(chatId);
+  if (!/^\d{1,20}$/.test(id)) throw new Error("Invalid private chat ID");
+  return USER_PREFIX + id;
+}
+async function readUser(env, chatId) {
+  const raw = await env.STATE.get(userKey(chatId));
+  if (!raw) return null;
+  try {
+    const item = JSON.parse(raw);
+    return item && typeof item.notifications_enabled === "boolean" ? item : null;
+  } catch (_) {
+    return null;
+  }
+}
+async function registerUser(env, chatId) {
+  const previous = await readUser(env, chatId);
+  if (previous) return previous;
+  const owner = await env.STATE.get("owner_chat_id");
+  const item = {
+    notifications_enabled: owner === String(chatId),
+    created_at: new Date().toISOString(),
+  };
+  await env.STATE.put(userKey(chatId), JSON.stringify(item), {
+    metadata: {notifications_enabled: item.notifications_enabled}
+  });
+  return item;
+}
+async function setUserNotifications(env, chatId, enabled) {
+  const previous = await registerUser(env, chatId);
+  const item = {...previous, notifications_enabled: Boolean(enabled)};
+  await env.STATE.put(userKey(chatId), JSON.stringify(item), {
+    metadata: {notifications_enabled: item.notifications_enabled}
+  });
+  return item;
+}
+async function* notificationTargets(env) {
+  const owner = await env.STATE.get("owner_chat_id");
+  let ownerRegistered = false;
+  let cursor;
+  do {
+    const page = await env.STATE.list({
+      prefix: USER_PREFIX,
+      limit: 1000,
+      ...(cursor ? {cursor} : {})
+    });
+    for (const key of page.keys || []) {
+      const id = key.name.slice(USER_PREFIX.length);
+      if (!/^\d{1,20}$/.test(id)) continue;
+      if (id === owner) ownerRegistered = true;
+      let enabled = key.metadata?.notifications_enabled;
+      if (typeof enabled !== "boolean") {
+        enabled = (await readUser(env, id))?.notifications_enabled === true;
+      }
+      if (enabled) yield id;
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  // Preserve previously scheduled messages for the verified owner until they
+  // explicitly opt out. Never override an owner's recorded opt-out.
+  if (owner && !ownerRegistered && /^\d{1,20}$/.test(owner)) yield owner;
+}
+async function deliverScheduledReport(env, chatId, owner, slot, message) {
+  const key = "sent:" + slot + ":" + chatId;
+  if (await env.STATE.get(key)) return false;
+  const legacyKey = "sent:" + slot;
+  if (chatId === owner && await env.STATE.get(legacyKey)) return false;
+  try {
+    await send(env, chatId, message);
+    await env.STATE.put(key, "1", {expirationTtl: 172800});
+    if (chatId === owner) {
+      await env.STATE.put(legacyKey, "1", {expirationTtl: 172800});
+    }
+    return true;
+  } catch (error) {
+    // A blocked/deactivated chat must not affect deliveries to other users.
+    const detail = String(error?.message || error);
+    if (/bot was blocked|user is deactivated|chat not found|forbidden/i.test(detail)) {
+      await setUserNotifications(env, chatId, false);
+    }
+    console.log("Rasadino scheduled recipient delivery failed");
+    return false;
+  }
+}
+
 async function onCallbackQuery(query,env) {
   if(!query || typeof query.data!=="string" || !query.id) return;
   const chatId=String(query.message?.chat?.id||"");
-  const owner=await env.STATE.get("owner_chat_id");
-  if(!owner || owner!==chatId || String(query.from?.id)!==owner) {
-    await telegram(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی به این بخش فعال نیست.",show_alert:true});
+  if (!/^\d{1,20}$/.test(chatId) || query.message?.chat?.type !== "private" || String(query.from?.id) !== chatId) {
+    await telegram(env,"answerCallbackQuery",{callback_query_id:query.id,text:"درخواست نامعتبر است.",show_alert:true});
     return;
   }
+  await registerUser(env,chatId);
   try { await telegram(env,"answerCallbackQuery",{callback_query_id:query.id}); }
   catch(e) { console.log("Telegram callback acknowledgement: "+String(e.message)); }
   if(query.data==="main:menu") {
@@ -773,16 +861,15 @@ async function onTelegram(update, env) {
   const cmd = rawCmd.split("@")[0].toLowerCase();
   const owner = await env.STATE.get("owner_chat_id");
 
-  // Keep the verified owner-only access until public registration is developed.
+  // Only the verified PIN can initially link the administrative owner.
+  // Public membership never needs or changes the owner PIN.
   if (cmd === "/start" && !owner && env.LINK_CODE && maybePin === env.LINK_CODE) {
     await env.STATE.put("owner_chat_id", chatId);
-    await send(env, chatId, welcome());
-    return;
   }
-  if (owner !== chatId) return;
+  const user = await registerUser(env, chatId);
 
   if (cmd === "/start" || cmd === "/menu" || line === "🚀 شروع") {
-    await send(env, chatId, welcome());
+    await send(env, chatId, welcome() + "\n\n" + (user.notifications_enabled ? "🔔 اعلان قیمت شما فعال است." : "🔕 برای فعال‌سازی اعلان قیمت، /subscribe را بفرست."));
   } else if (cmd === "/price" || cmd === "/now" || line === "💰 قیمت" || line === "📊 قیمت بازار") {
     await send(env, chatId, report(await prices()));
   } else if (cmd === "/weather" || line === "🌤 آب و هوا" || line === "🌤 هواشناسی") {
@@ -797,16 +884,16 @@ async function onTelegram(update, env) {
       reply_markup: {inline_keyboard: [[{text: "💬 شروع گفتگو با پشتیبان", url: "https://t.me/hamidhosseinis"}]]}
     });
   } else if (cmd === "/status" || line === "🔔 اعلان‌های من") {
-    await send(env, chatId, "🔔 گزارش فعال: قیمت بازار\n🕙 هر روز ساعت ۱۰ صبح و ۱۰ شب به وقت ایران.\nبرای توقف اعلان‌ها: /stop");
+    await send(env, chatId, (user.notifications_enabled ? "🔔 اعلان قیمت فعال است." : "🔕 اعلان قیمت غیرفعال است.") +
+      "\n🕙 زمان‌بندی: ۱۰ صبح و ۱۰ شب به وقت ایران.\nفعال‌سازی: /subscribe\nغیرفعال‌سازی: /stop");
+  } else if (cmd === "/subscribe") {
+    await setUserNotifications(env,chatId,true);
+    await send(env,chatId,"✅ اعلان قیمت برای حساب شما فعال شد.\n🕙 هر روز ساعت ۱۰ صبح و ۱۰ شب به وقت ایران.\nبرای توقف: /stop");
   } else if (cmd === "/help" || line === "ℹ️ راهنما") {
-    await send(env, chatId, "📖 راهنمای رصدینو\n🚀 شروع: نمایش منو و معرفی\n💰 قیمت: گزارش بازار\n🌤 آب و هوا: هوای امروز و فردای چهار شهر گلستان\n📰 اخبار: آخرین تیترهای استان گلستان و لینک منابع\n💬 پشتیبان: گفتگو با @hamidhosseinis\n\nدستورات: /start /price /weather /news /support /stop");
+    await send(env, chatId, "📖 راهنمای رصدینو\n🚀 شروع: نمایش منو و معرفی\n💰 قیمت: گزارش بازار\n🌤 آب و هوا: هوای امروز و فردای چهار شهر گلستان\n📰 اخبار: آخرین تیترهای استان گلستان و لینک منابع\n💬 پشتیبان: گفتگو با @hamidhosseinis\n\nاعلان قیمت اختیاری است و برای هر کاربر جدا تنظیم می‌شود.\nدستورات: /start /price /weather /news /support /subscribe /status /stop");
   } else if (cmd === "/stop") {
-    await env.STATE.delete("owner_chat_id");
-    await telegram(env, "sendMessage", {
-      chat_id: chatId,
-      text: "⏸ ارسال خودکار متوقف شد. برای اتصال دوباره /start را همراه با کد فعال‌سازی ارسال کن.",
-      reply_markup: {remove_keyboard: true}
-    });
+    await setUserNotifications(env,chatId,false);
+    await send(env,chatId,"⏸ اعلان‌های زمان‌بندی‌شده فقط برای حساب شما متوقف شد.\nبرای دریافت دوباره: /subscribe\nاستفاده از قیمت، هواشناسی و اخبار همچنان فعال است.");
   } else {
     await send(env, chatId, "👇 یکی از پنج دکمه ثابت پایین صفحه را انتخاب کن.");
   }
@@ -849,8 +936,9 @@ export default {
       }
       return Response.json({
         service:"hamid-price-report-telegram-bot",
-        configured: Boolean(env.BOT_TOKEN && env.LINK_CODE && env.WEBHOOK_SECRET),
+        configured: Boolean(env.BOT_TOKEN && env.WEBHOOK_SECRET && env.STATE),
         linked: Boolean(await env.STATE.get("owner_chat_id")),
+        access: "public", notifications: "opt-in",
         webhook,
         timezone:TIMEZONE, scheduled_local_times:["10:00","22:00"]
       }, {headers:{"Cache-Control":"no-store"}});
@@ -862,17 +950,20 @@ export default {
       ctx.waitUntil(refreshGolestanNews(env));
       return;
     }
+    if (event.cron !== "30 6,18 * * *") return;
     ctx.waitUntil((async () => {
       if (!env.BOT_TOKEN) return;
       try { await installWebhook(env); } catch(e) { console.log("Webhook install: " + String(e.message)); }
-      const chatId = await env.STATE.get("owner_chat_id");
-      if (!chatId) return;
       const slot = new Date(event.scheduledTime).toISOString().slice(0, 16);
-      const sentKey = "sent:" + slot;
-      if (await env.STATE.get(sentKey)) return;
-      const q = await prices();
-      await send(env, chatId, report(q));
-      await env.STATE.put(sentKey, "1", {expirationTtl: 172800});
+      const owner = await env.STATE.get("owner_chat_id");
+      let message = null;
+      for await (const chatId of notificationTargets(env)) {
+        if (message === null) message = report(await prices());
+        await deliverScheduledReport(env, chatId, owner, slot, message);
+      }
     })().catch(e => {console.log("Scheduled report failed: " + String(e.message)); throw e;}));
   }
 };
+
+// Export narrow testable helpers; HTTP access still requires the verified webhook.
+export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport};
