@@ -180,7 +180,7 @@ async function getWeatherReport(env) {
     }
     rows.push(precipitationOutlook(upcomingWeatherHours(data.hourly)),"");
   }
-  rows.push("منبع: Open-Meteo (گزینش مدل‌های هواشناسی)؛ پیش‌بینی برای مرکز شهر است، نه گزارش قطعی ایستگاه.");
+  rows.push("منبع: Open-Meteo | https://open-meteo.com/ (گزینش مدل‌های هواشناسی)؛ پیش‌بینی برای مرکز شهر است، نه گزارش قطعی ایستگاه.");
   const report = rows.join("\n");
   if(results.some(x=>!x.error)) {
     try {await env.STATE.put(cacheKey,report,{expirationTtl:300});}
@@ -236,7 +236,7 @@ async function singleCityWeather(env,cityId,view="summary") {
         " | احتمال بارش "+weatherNumber(validChance(h.chance)?h.chance:null)+"٪"
       ),
       "",
-      "📍 منبع: Open-Meteo (best_match) | ساعت‌ها به وقت ایران",
+      "📍 منبع: Open-Meteo | https://open-meteo.com/ | ساعت‌ها به وقت ایران",
       "این پیش‌بینی ساعتی است، نه رادار بارش لحظه‌ای."
     ].join("\n");
   }
@@ -258,7 +258,7 @@ async function singleCityWeather(env,cityId,view="summary") {
     "",
     precipitationOutlook(hours),
     "",
-    "منبع: Open-Meteo (best_match) | پیش‌بینی مدل‌ها برای مرکز شهر، نه داده اختصاصی Google Weather"
+    "منبع: Open-Meteo | https://open-meteo.com/ | پیش‌بینی مدل‌ها برای مرکز شهر، نه داده اختصاصی Google Weather"
   ].join("\n");
 }
 function weatherViewKeyboard(cityId,view) {
