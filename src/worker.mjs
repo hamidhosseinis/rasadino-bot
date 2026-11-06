@@ -196,7 +196,7 @@ async function sendWeatherMenu(env,chatId,page=0) {
   const selected=Number.isInteger(page)?Math.max(0,Math.min(page,pageCount-1)):0;
   return telegram(env,"sendMessage",{
     chat_id:chatId,
-    text:"🌤 آب‌وهوای ۳۷ شهر استان گلستان\\n\\n👇 شهر موردنظر را انتخاب کن تا فقط پیش‌بینی همان شهر نمایش داده شود.\\n📄 صفحه "+weatherNumber(selected+1)+" از "+weatherNumber(pageCount),
+    text:"🌤 آب‌وهوای ۳۷ شهر استان گلستان\n\n👇 شهر موردنظر را انتخاب کن تا فقط پیش‌بینی همان شهر نمایش داده شود.\n📄 صفحه "+weatherNumber(selected+1)+" از "+weatherNumber(pageCount),
     reply_markup:cityWeatherKeyboard(selected)
   });
 }
