@@ -3,6 +3,11 @@ const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
 const TETHER_URL = "https://www.tgju.org/profile/crypto-tether";
 
+// The existing persistent KV stores a snapshot updated every ten minutes.
+const PRICE_CACHE_KEY = "prices:latest:v1";
+const PRICE_READ_MAX_AGE_MS = 15 * 60 * 1000;
+const PRICE_QUOTE_MAX_AGE_MS = 20 * 60 * 1000;
+
 async function telegram(env, method, data = {}) {
   if (!env.BOT_TOKEN) throw new Error("BOT_TOKEN not configured");
   const response = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + method, {
@@ -82,10 +87,12 @@ function priceViewText(pr,asset="all") {
     gold:"🥇 هر گرم طلای ۱۸ عیار: "+money(pr.gold,"IRR")
   };
   if(asset==="all")return report(pr);
-  return "💰 قیمت لحظه‌ای\n\n"+names[asset]+
-    "\n\n🕒 زمان دریافت: "+new Intl.DateTimeFormat("fa-IR",{
-      timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
-    }).format(new Date(pr.at));
+  return "💰 آخرین قیمت ثبت‌شده\n\n"+names[asset]+
+    "\n\n🕒 آخرین دریافت معتبر: "+(pr[asset].updatedAt
+      ? new Intl.DateTimeFormat("fa-IR",{
+          timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
+        }).format(new Date(pr[asset].updatedAt))
+      : "نامشخص");
 }
 async function showMainMenu(env,chatId,messageId=null,note="") {
   return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
@@ -377,7 +384,7 @@ async function onCallbackQuery(query,env) {
   if(action==="price:menu")return showPriceMenu(env,chatId,messageId);
   if(["price:btc","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
     const asset=action==="price:refresh"?"all":action.slice(6);
-    return renderMenu(env,chatId,priceViewText(await prices(),asset),priceResultKeyboard(),messageId);
+    return renderMenu(env,chatId,priceViewText(await prices(env),asset),priceResultKeyboard(),messageId);
   }
   if(action==="sources:show"){
     return renderMenu(env,chatId,sourcesMessage(),simpleBackKeyboard(),messageId);
@@ -903,16 +910,77 @@ async function quote(task) {
   try { return await task(); }
   catch (e) { console.log("Quote unavailable: " + String(e.message)); return {value: null, source: "unavailable"}; }
 }
-async function prices() {
+async function fetchPriceQuotes() {
   const [btc, usdt, gold] = await Promise.all([
     quote(btcPrice),
     quote(() => tgjuRial(TETHER_URL, "tether")),
     quote(() => tgjuRial(GOLD_URL, "gold"))
   ]);
-  return {btc, usdt, gold, at: new Date().toISOString()};
+  return {btc, usdt, gold};
+}
+function validPriceQuote(item) {
+  return item && typeof item.value === "number" && Number.isFinite(item.value) && item.value > 0;
+}
+async function readPriceCache(env) {
+  const raw = await env.STATE.get(PRICE_CACHE_KEY);
+  if (!raw) return null;
+  try {
+    const item = JSON.parse(raw);
+    return item && Number.isFinite(Date.parse(item.at)) ? item : null;
+  } catch (_) {
+    return null;
+  }
+}
+function visibleQuote(item, now) {
+  const updated = Date.parse(item?.updatedAt || "");
+  if (!validPriceQuote(item) || !Number.isFinite(updated) ||
+      updated > now + 60000 || now - updated > PRICE_QUOTE_MAX_AGE_MS) {
+    return {value:null, source:item?.source || "unavailable",
+      updatedAt:Number.isFinite(updated) ? item.updatedAt : null, stale:true};
+  }
+  return {...item, stale:false};
+}
+function visibleSnapshot(item) {
+  const now = Date.now();
+  return {...item,
+    btc:visibleQuote(item.btc,now),
+    usdt:visibleQuote(item.usdt,now),
+    gold:visibleQuote(item.gold,now)};
+}
+// Refresh providers independently, preserving each last successful quote.
+async function refreshPriceSnapshot(env) {
+  let previous = null;
+  try { previous = await readPriceCache(env); }
+  catch (e) { console.log("Price cache read failed: " + String(e.message)); }
+  const fresh = await fetchPriceQuotes();
+  const at = new Date().toISOString();
+  const merged = {};
+  for (const asset of ["btc","usdt","gold"]) {
+    merged[asset] = validPriceQuote(fresh[asset])
+      ? {...fresh[asset], updatedAt:at}
+      : (validPriceQuote(previous?.[asset]) ? previous[asset]
+        : {value:null, source:"unavailable", updatedAt:null});
+  }
+  const snapshot = {...merged, at};
+  await env.STATE.put(PRICE_CACHE_KEY, JSON.stringify(snapshot));
+  return visibleSnapshot(snapshot);
+}
+// Requests prefer KV; if the Cron is delayed, attempt one recovery refresh.
+async function prices(env) {
+  let cached = null;
+  try { cached = await readPriceCache(env); }
+  catch (e) { console.log("Price cache read failed: " + String(e.message)); }
+  if (cached && Date.now() - Date.parse(cached.at) < PRICE_READ_MAX_AGE_MS)
+    return visibleSnapshot(cached);
+  try { return await refreshPriceSnapshot(env); }
+  catch (e) {
+    console.log("Price refresh failed; returning last safe snapshot: " + String(e.message));
+    if (cached) return visibleSnapshot(cached);
+    throw e;
+  }
 }
 function money(item, currency) {
-  return item.value === null ? "در دسترس نیست" :
+  return !validPriceQuote(item) ? "در دسترس نیست" :
     new Intl.NumberFormat("fa-IR", {maximumFractionDigits: currency === "USD" ? 2 : 0}).format(item.value) + " " + (currency === "USD" ? "دلار" : "تومان");
 }
 function report(pr) {
@@ -921,13 +989,13 @@ function report(pr) {
   }).format(new Date(pr.at));
   return [
     "📊 گزارش قیمت بازار",
-    "🗓 " + date,
+    "🗓 آخرین بررسی: " + date,
     "",
     "₿ بیت‌کوین: " + money(pr.btc, "USD"),
     "💵 تتر (USDT): " + money(pr.usdt, "IRR"),
     "🥇 هر گرم طلای ۱۸ عیار: " + money(pr.gold, "IRR"),
     "",
-    "نرخ‌ها بر اساس آخرین اطلاعات قابل دریافت‌اند؛ در تعطیلی یا اختلال ممکن است به‌روز نباشند."
+    "قیمت‌ها هر ۱۰ دقیقه بررسی می‌شوند؛ نرخ قدیمی‌تر از ۲۰ دقیقه نمایش داده نمی‌شود."
   ].join("\n");
 }
 function sourcesMessage() {
@@ -983,7 +1051,7 @@ async function onTelegram(update, env) {
       user.notifications_enabled?"🔔 اعلان قیمت فعال است.":"🔕 برای فعال‌سازی اعلان قیمت: /subscribe");
   }
   if(cmd==="/price" || cmd==="/now" || line==="💰 قیمت" || line==="📊 قیمت بازار")
-    return send(env,chatId,report(await prices()),priceResultKeyboard());
+    return send(env,chatId,report(await prices(env)),priceResultKeyboard());
   if(cmd==="/weather" || line==="🌤 آب و هوا" || line==="🌤 هواشناسی")
     return sendWeatherMenu(env,chatId);
   if(cmd==="/sources" || line==="📚 منابع" || line==="📚 منابع اطلاعات")
@@ -1041,7 +1109,7 @@ export default {
       return Response.json(data?JSON.parse(data):{status:"not_scanned_yet"},{headers:{"Cache-Control":"no-store"}});
     }
     if (request.method === "GET" && url.pathname === "/prices") {
-      const data = await prices();
+      const data = await prices(env);
       return Response.json({report: report(data), quotes:data}, {headers: {"Cache-Control":"no-store"}});
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
@@ -1056,7 +1124,7 @@ export default {
         linked: Boolean(await env.STATE.get("owner_chat_id")),
         access: "public", notifications: "opt-in",
         webhook,
-        timezone:TIMEZONE, scheduled_local_times:["10:00","22:00"]
+        timezone:TIMEZONE, price_refresh_minutes:10, scheduled_local_times:["10:00","22:00"]
       }, {headers:{"Cache-Control":"no-store"}});
     }
     return new Response("Not found", {status:404});
@@ -1066,6 +1134,13 @@ export default {
       ctx.waitUntil(refreshGolestanNews(env));
       return;
     }
+    if(event.cron==="*/10 * * * *") {
+      ctx.waitUntil(refreshPriceSnapshot(env).catch(e => {
+        console.log("10-minute price refresh failed: " + String(e.message));
+        throw e;
+      }));
+      return; // Cache refresh never broadcasts on Telegram.
+    }
     if (event.cron !== "30 6,18 * * *") return;
     ctx.waitUntil((async () => {
       if (!env.BOT_TOKEN) return;
@@ -1074,7 +1149,7 @@ export default {
       const owner = await env.STATE.get("owner_chat_id");
       let message = null;
       for await (const chatId of notificationTargets(env)) {
-        if (message === null) message = report(await prices());
+        if (message === null) message = report(await prices(env));
         await deliverScheduledReport(env, chatId, owner, slot, message);
       }
     })().catch(e => {console.log("Scheduled report failed: " + String(e.message)); throw e;}));
@@ -1082,4 +1157,4 @@ export default {
 };
 
 // Export narrow testable helpers; HTTP access still requires the verified webhook.
-export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard};
+export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard, prices, refreshPriceSnapshot};
