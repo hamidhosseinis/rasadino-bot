@@ -293,3 +293,27 @@ test("leaving music search cancels the pending free-text mode",async t=>{
     from:{id:66101},text:"Hello"}}); // without an active search, open the main menu.
   assert.match(calls.at(-1).payload.text,/خوش آمدی/);
 });
+
+test("Audius relative permalink is resolved only to audius.co, never to another host",()=>{
+  const relative=normalizeAudius({...audiusTrack("valid42"),permalink:"/artist-name/valid-track"});
+  assert.ok(relative);
+  assert.equal(relative.play_url,"https://audius.co/artist-name/valid-track");
+  const absolute=normalizeAudius({...audiusTrack("valid43"),permalink:"https://audius.co/artist-name/valid-track"});
+  assert.ok(absolute);
+  for(const permalink of ["//evil.example/steal","///evil.example/steal",
+    "/\\\\evil.example/steal","https://audius.co.evil.example/track",
+    "https://evil.example/audius.co/song","javascript:alert(1)","/foo\u0000bar"]){
+    assert.equal(normalizeAudius({...audiusTrack("bad44"),permalink}),null,permalink);
+  }
+});
+
+test("realistic Audius search response with relative permalink now returns tracks",async()=>{
+  const {fetcher}=providerStub({audius:[{
+    ...audiusTrack("abc_42","Music For You","Artist Name"),
+    permalink:"/artist-name/music-for-you"
+  }]});
+  const results=await searchAudius("Music For You",{fetcher});
+  assert.equal(results.length,1);
+  assert.equal(results[0].source,"Audius");
+  assert.equal(results[0].play_url,"https://audius.co/artist-name/music-for-you");
+});
