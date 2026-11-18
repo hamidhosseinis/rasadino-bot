@@ -3,7 +3,10 @@ import {searchITunes,searchAudius} from "../src/music/providers.mjs";
 const tasks=[
   ["itunes_us",()=>searchITunes("Taylor Swift")],
   ["itunes_persian_artist",()=>searchITunes("Googoosh")],
-  ["audius_search",()=>searchAudius("Skrillex")]
+  ["itunes_persian_script",()=>searchITunes("گوگوش")],
+  ["audius_search",()=>searchAudius("Skrillex")],
+  ["audius_generic_music",()=>searchAudius("music")],
+  ["audius_electronic",()=>searchAudius("electronic")]
 ];
 let ok=0;
 for(const [label,run] of tasks) {
