@@ -1,4 +1,4 @@
-// Rasadino Music — stage 4 navigation only. No external requests or persistent writes.
+// Rasadino Music — pure navigation only. Search happens in an independent service.
 // All callback values are ASCII, whitelisted, and below Telegram's 64-byte limit.
 const LANGUAGES = Object.freeze({
   fa: "🇮🇷 فارسی",
@@ -70,7 +70,7 @@ function typeLabel(kind) {
 export function musicMenuView(action = "music:home") {
   if (action === "music:home") {
     return view(
-      "🎧 رصد موزیک\n\nزبان موسیقی را انتخاب کن.\n\nℹ️ این بخش در مرحله طراحی منو است؛ هنوز آهنگی جست‌وجو یا ارسال نمی‌شود.",
+      "🎧 رصد موزیک\n\nزبان موسیقی را انتخاب کن.\n\n🔎 برای جست‌وجوی واقعی، زبان را انتخاب کن و دکمه جست‌وجو را بزن.\nبخش پیشنهادهای هوشمند هنوز در حال توسعه است.",
       [
         [button(LANGUAGES.fa, "music:lang:fa")],
         [button(LANGUAGES.us, "music:lang:us")],
@@ -92,10 +92,26 @@ export function musicMenuView(action = "music:home") {
     return view(
       "🎧 رصد موزیک\n🌍 زبان: " + LANGUAGES[lang] + "\n\nژانر موردنظر را انتخاب کن." + note,
       [
+        [button("🔎 جست‌وجوی آهنگ یا خواننده", "music:search:" + lang)],
         ...compact(GENRES[lang].map(([id, label]) =>
           button(label, "music:genre:" + lang + ":" + id))),
         ...footer("music:home")
       ]
+    );
+  }
+
+  if (parts[1] === "search" && parts.length === 3) {
+    const lang = parts[2];
+    if (!Object.hasOwn(LANGUAGES, lang)) return null;
+    return view(
+      "🔎 جست‌وجوی موسیقی" +
+      "\n🌍 زبان: " + LANGUAGES[lang] +
+      "\n\nنام آهنگ یا خواننده را بعد از یکی از دستورهای زیر بنویس:" +
+      "\n" + (lang === "fa" ? "/findmusic fa گوگوش" : "/findmusic us Taylor Swift") +
+      "\n\nℹ️ جست‌وجو نام و خواننده را در منابع مجاز بررسی می‌کند." +
+      "\nنتایج جست‌وجو به معنی رتبه‌بندی یا تأیید ملیت هنرمند نیستند." +
+      "\nهیچ فایل صوتی دانلود یا بازنشر نمی‌شود.",
+      footer("music:lang:" + lang)
     );
   }
 
