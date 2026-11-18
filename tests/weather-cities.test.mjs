@@ -158,7 +158,7 @@ test("Manual and scheduled price reports omit provider names and URLs",async t=>
   assert.match(message,/گزارش قیمت بازار/);
   assert.match(message,/بیت‌کوین/);
   assert.doesNotMatch(message,/CoinGecko|Coinbase|TGJU|tgju\.org|منابع:/);
-  assert.equal(price.length,3);
+  assert.equal(price.length,4);
   assert.equal((await update(e,"/start",1201)).status,200);
   assert.equal((await update(e,"/subscribe",1202)).status,200);
   const scheduled=[];
