@@ -21,7 +21,7 @@ test("oil comparison uses World Bank March 1978 proxy (12.66 USD/bbl)",()=>{
   assert.match(line,/نفت خام برنت/);
   assert.match(line,/۱۲٫۶۶ دلار/);
   assert.match(line,/۱۳۵۷/);
-  assert.match(line,/آخرین روز معامله/);
+  assert.match(line,/تاریخ نرخ جهانی/);
   assert.match(line,/↗/);
   assert.equal(priceLine({value:100},"usd"),"قیمت نامشخص");
 });
