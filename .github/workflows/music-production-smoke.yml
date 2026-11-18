@@ -1,0 +1,24 @@
+name: Rasadino original bot — live production smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/music-production-smoke.mjs"
+      - ".github/workflows/music-production-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  production-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check actual deployed Rasadino public Worker (no credentials)
+        run: node scripts/music-production-smoke.mjs
