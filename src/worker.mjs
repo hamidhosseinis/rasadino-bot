@@ -2,10 +2,14 @@
 const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
 const TETHER_URL = "https://www.tgju.org/profile/crypto-tether";
-// Brent front-month futures (USD per barrel); free public sources, no API key.
-const OIL_STOOQ_URL = "https://stooq.com/q/l/?s=cb.f&f=sd2t2ohlcv&h&e=csv";
-const OIL_FALLBACK_URL = "https://americasoilwatch.com/api/v1/brent";
-const OIL_MARKET_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Global Brent oil, USD/barrel. Verified on 2026-11-18: Stooq's old URL returns HTTP 404.
+// AmericasOilWatch supplies the current global Brent futures quote (Yahoo Finance source).
+// EIA daily spot series is published by FRED, mirrored by the GitHub datasets project.
+const OIL_PRIMARY_URL = "https://americasoilwatch.com/api/v1/brent";
+const OIL_EIA_FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILBRENTEU";
+const OIL_EIA_MIRROR_URL = "https://raw.githubusercontent.com/datasets/oil-prices/main/data/brent-daily.csv";
+const OIL_MARKET_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const OIL_CACHE_GRACE_MS = 48 * 60 * 60 * 1000;
 
 // Historical estimates, not observed retail prices on 1 Farvardin 1357.
 // Approx. USD = 7 tomans in early 1357; gold fixing = $177.25/oz on 21 Mar 1978.
@@ -942,41 +946,58 @@ function validOilPrice(value,marketDate) {
   }
   return v;
 }
-async function stooqBrentPrice() {
-  const r=await fetch(OIL_STOOQ_URL,{
-    headers:{"Accept":"text/csv","User-Agent":"Mozilla/5.0 (compatible; RasadinoBot/1.0)"},
-    signal:AbortSignal.timeout(12000)
+// For a regular trading day the futures quote is preferred. Never guess a price.
+async function americasBrentPrice() {
+  const r=await fetch(OIL_PRIMARY_URL,{
+    headers:{"Accept":"application/json","User-Agent":"RasadinoBot/1.0"},
+    signal:AbortSignal.timeout(8500)
   });
-  if(!r.ok)throw Error("Stooq oil HTTP "+r.status);
-  const lines=(await r.text()).trim().split(/\r?\n/);
-  if(lines.length<2)throw Error("Stooq oil CSV unavailable");
-  const headers=lines[0].split(",").map(x=>x.trim().toLowerCase());
-  const data=lines[1].split(",").map(x=>x.trim());
-  const get=name=>data[headers.indexOf(name)];
-  if(!headers.includes("close") || !headers.includes("date") ||
-     !/^cb[.]f$/i.test(get("symbol")||""))throw Error("Unexpected Stooq Brent data");
-  const marketDate=oilMarketDate(get("date"));
-  const value=validOilPrice(get("close"),marketDate);
-  return {value,source:"Stooq CB.F",marketDate};
-}
-async function backupBrentPrice() {
-  const r=await fetch(OIL_FALLBACK_URL,{headers:{"Accept":"application/json"},
-    signal:AbortSignal.timeout(12000)});
-  if(!r.ok)throw Error("AmericasOilWatch HTTP "+r.status);
+  if(!r.ok)throw Error("AmericasOilWatch oil HTTP "+r.status);
   const j=await r.json();
-  const d=j?.data??j?.quote??j?.brent??j?.latest??j;
-  const rawValue=d?.price_usd_per_bbl??d?.price_usd??d?.price??
-    d?.current_price??d?.value??j?.price;
-  const rawDate=d?.market_date??d?.as_of??d?.date??d?.updated_at??
-    d?.timestamp??j?.market_date??j?.as_of??j?.date??j?.updated_at;
-  const marketDate=oilMarketDate(rawDate);
+  // Actual API shape: {priceUsd:93.33,sessionDate:"2026-11-17",quoteStatus:"current",...}
+  const rawValue=j?.priceUsd??j?.price_usd??j?.price;
+  const marketDate=oilMarketDate(j?.sessionDate??j?.observedAt??j?.lastUpdated);
   const value=validOilPrice(rawValue,marketDate);
-  return {value,source:"AmericasOilWatch",marketDate};
+  return {value,source:"AmericasOilWatch / Brent Futures",marketDate,oilType:"futures"};
+}
+// Published official EIA Brent Europe *spot* price, via FRED or a public CSV mirror.
+// These feeds can be a few business days behind. The market date is always shown.
+async function brentEiaCsvPrice(url,source) {
+  const response=await fetch(url,{
+    headers:{"Accept":"text/csv,text/plain","User-Agent":"RasadinoBot/1.0"},
+    signal:AbortSignal.timeout(9000)
+  });
+  if(!response.ok)throw Error(source+" HTTP "+response.status);
+  const csv=await response.text();
+  if(csv.length<40 || csv.length>2000000)throw Error(source+" invalid CSV size");
+  const lines=csv.trim().split(/\r?\n/);
+  const header=lines.shift()?.replace(/^\uFEFF/,"").toLowerCase().split(",").map(s=>s.trim())||[];
+  const dateIdx=header.findIndex(x=>x==="date"||x==="observation_date");
+  const priceIdx=header.findIndex(x=>x==="price"||x==="dcoilbrenteu");
+  if(dateIdx<0||priceIdx<0)throw Error(source+" unexpected CSV headers");
+  for(let n=lines.length-1;n>=Math.max(0,lines.length-45);n--){
+    const columns=lines[n].split(",");
+    const day=oilMarketDate(columns[dateIdx]);
+    const rawValue=columns[priceIdx];
+    if(!day||!rawValue||rawValue.trim()===".")continue;
+    try {
+      const value=validOilPrice(rawValue,day);
+      return {value,source,marketDate:day,oilType:"spot"};
+    } catch (_) {continue;}
+  }
+  throw Error(source+" has no sufficiently recent Brent quote");
 }
 async function oilPrice() {
-  try{return await stooqBrentPrice();}
-  catch(e){console.log("Oil primary provider unavailable: "+String(e.message));
-    return backupBrentPrice();}
+  const providers=[
+    () => americasBrentPrice(),
+    () => brentEiaCsvPrice(OIL_EIA_FRED_URL,"EIA via FRED"),
+    () => brentEiaCsvPrice(OIL_EIA_MIRROR_URL,"EIA via GitHub mirror")
+  ];
+  for(let i=0;i<providers.length;i++){
+    try {return await providers[i]();}
+    catch(e){console.log("Brent oil provider "+(i+1)+" unavailable: "+String(e.message));}
+  }
+  throw Error("No valid Brent price from three independent endpoints");
 }
 async function quote(task) {
   try { return await task(); }
@@ -1007,13 +1028,17 @@ async function readPriceCache(env) {
 function visibleQuote(item, now) {
   const updated = Date.parse(item?.updatedAt || "");
   const marketStamp=item?.marketDate?Date.parse(item.marketDate+"T00:00:00Z"):null;
+  const isOil=typeof item?.marketDate==="string";
+  const maxCachedAge=isOil ? OIL_CACHE_GRACE_MS : PRICE_QUOTE_MAX_AGE_MS;
   if (!validPriceQuote(item) || !Number.isFinite(updated) ||
-      updated > now + 60000 || now - updated > PRICE_QUOTE_MAX_AGE_MS ||
-      (item?.marketDate && (!Number.isFinite(marketStamp) || now-marketStamp>OIL_MARKET_MAX_AGE_MS))) {
+      updated > now + 60000 || now - updated > maxCachedAge ||
+      (isOil && (!Number.isFinite(marketStamp) ||
+                  marketStamp>now+86400000 || now-marketStamp>OIL_MARKET_MAX_AGE_MS))) {
     return {value:null, source:item?.source || "unavailable",
       updatedAt:Number.isFinite(updated) ? item.updatedAt : null, stale:true};
   }
-  return {...item, stale:false};
+  return {...item, stale:false,
+    delayed:isOil && now-updated>PRICE_QUOTE_MAX_AGE_MS};
 }
 function visibleSnapshot(item) {
   const now = Date.now();
@@ -1084,11 +1109,13 @@ function priceLine(item, asset) {
       note:"رشد از برآورد حدود ۳۰ تومان در ابتدای ۱۳۵۷"}
   }[asset];
   if (!data) return "قیمت نامشخص";
-  const dateLine=asset==="oil" && item?.marketDate ?
-    "\n  📅 آخرین روز معامله: "+new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
+  const marketInfo=asset==="oil" && item?.marketDate && validPriceQuote(item) ?
+    "\n  📅 تاریخ نرخ جهانی: "+new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
       timeZone:"UTC",year:"numeric",month:"2-digit",day:"2-digit"
-    }).format(new Date(item.marketDate+"T00:00:00Z")) : "";
-  return data.title+": "+money(item,data.currency)+dateLine+"\n  📈 "+data.note+": "+growthText(item,data.baseline);
+    }).format(new Date(item.marketDate+"T00:00:00Z"))+
+    (item?.oilType==="spot" ? " (نرخ نقدی برنت)" : " (قرارداد آتی برنت)")+
+    (item?.delayed ? "\n  ⚠️ آخرین نرخ ذخیره‌شده؛ دریافت تازه ناموفق بوده." : "") : "";
+  return data.title+": "+money(item,data.currency)+marketInfo+"\n  📈 "+data.note+": "+growthText(item,data.baseline);
 }
 function report(pr) {
   const date = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
@@ -1107,8 +1134,8 @@ function report(pr) {
     priceLine(pr.gold,"gold"),
     "",
     "ℹ️ مقایسه نفت با شاخص تاریخی تقریبی است؛ روش و منابع در 📚 منابع.",
-    "قیمت‌ها هر ۱۰ دقیقه بررسی می‌شوند؛ نرخ ثبت‌شده بیش از ۲۰ دقیقه قبل بازنمایی نمی‌شود.",
-    "نفت: آخرین نرخ منتشرشده بازار (ممکن است در تعطیلی بورس ثابت بماند)."
+    "قیمت‌ها هر ۱۰ دقیقه بررسی می‌شوند؛ نرخ نامعتبر نمایش داده نمی‌شود.",
+    "نفت: آخرین نرخ جهانی معتبر با تاریخ نرخ؛ نرخ بازار در تعطیلات ثابت می‌ماند."
   ].join("\n");
 }
 function sourcesMessage() {
@@ -1125,10 +1152,13 @@ function sourcesMessage() {
     "در صورت اختلال CoinGecko: Coinbase — منبع جایگزین",
     "https://www.coinbase.com/price/bitcoin",
     "",
-    "🛢 نفت خام برنت (دلار آمریکا برای هر بشکه): Stooq (قرارداد آتی نزدیک‌ترین سررسید) — منبع اصلی",
-    "https://stooq.com/q/?s=cb.f",
-    "در صورت اختلال: AmericasOilWatch — منبع جایگزین (به‌روزرسانی بر اساس داده‌های بازار)",
-    OIL_FALLBACK_URL,
+    "🛢 نفت خام برنت (دلار آمریکا برای هر بشکه): AmericasOilWatch — قرارداد آتی جهانی؛ منبع اصلی",
+    OIL_PRIMARY_URL,
+    "در صورت اختلال: قیمت نقدی برنت اروپا از EIA به نقل از FRED — داده روزانه",
+    "https://fred.stlouisfed.org/series/DCOILBRENTEU",
+    "منبع پشتیبان: آینه داده‌های عمومی EIA در مخزن datasets/oil-prices",
+    "https://github.com/datasets/oil-prices",
+    "ℹ️ در زمان استفاده از منبع پشتیبان، نرخ نقدی برنت به‌جای قرارداد آتی نمایش داده می‌شود؛ تاریخ دقیق داده کنار قیمت درج می‌شود.",
     "",
     "💲 تتر (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
     TETHER_URL,
