@@ -19,7 +19,7 @@ Existing genre/type/count menus from Stage 4 still end at an honest selection su
 - `src/music/providers.mjs`: fixed-domain iTunes Search API (`country=US`, song media only) and Audius search adapters. Public metadata only. URL host allow-list; never propagate preview/audio/CID fields.
 - `src/music/search.mjs`: input validation, provider isolation through `Promise.allSettled`, cross-provider deduplication, TTL cache, per-chat best-effort cooldown, and plain-text Telegram results.
 - Apple iTunes: US storefront is a catalog location, **not verified artist citizenship**. Persian-script coverage is incomplete.
-- Audius: API code and normalized fixtures are tested. Real no-key searches returned zero valid results for several queries in a 2026-11-18 GitHub runner preflight. **Do not claim production coverage until a working query/credential path is verified.**
+- Audius: real search API returns **root-relative** permalinks (`/artist/track`). Normalization was fixed to resolve them only to `https://audius.co` and to reject control characters and external hosts. A subsequent 2026-11-18 GitHub-runner preflight verified 12 usable metadata results each for `Skrillex`, `music`, and `electronic` (three of three queries). This proves runner access, **not** access from a deployed Cloudflare Worker.
 - MusicBrainz: metadata enrichment is postponed until rate limiting (1 req/second per IP), actual availability and proper User-Agent are safely handled.
 - No live MusicBrainz, Spotify, Apple Music paid developer APIs or scraping is enabled.
 
@@ -57,3 +57,11 @@ Build a source-backed recommendation engine for chosen language/genre/type/count
 - do not label ordinary search results as a real chart or "today's trends";
 - only display a chart rank if a dated licensed chart source provides it;
 - learn user preferences only with explicit positive/negative feedback and private storage.
+
+## Stage 5 follow-up verification (2026-11-18)
+
+- Real provider preflight: **6/6 sample searches** produced valid metadata (3 iTunes including Persian-script, 3 Audius). Search results are samples and do not prove Persian/US artist classification.
+- Cloudflare-compatible **local workerd/Miniflare** smoke: passed with synthetic music metadata, a separate local KV, zero live credentials, and no real Telegram messages. Existing Worker rejected invalid webhook requests.
+- GitHub Actions regression suite: **65 passed / 0 failed**, including URL-injection and relative Audius permalink tests.
+- Tests covered mock Telegram and local workerd. There is **no independently deployed staging Worker**, no actual Telegram test bot integration, no validated outbound iTunes/Audius access from Cloudflare production runtime, and no live bot release.
+- The current Cloudflare production Worker, existing Crons and main branch are intentionally unchanged.
