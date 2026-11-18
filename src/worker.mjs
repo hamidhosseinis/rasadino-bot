@@ -925,7 +925,7 @@ async function btcPrice() {
 // Quote timestamps are market dates, distinct from the 10-minute cache-refresh time.
 function oilMarketDate(value) {
   const raw=String(value??"").trim();
-  const match=raw.match(/^(\\d{4})[-/]?(\\d{2})[-/]?(\\d{2})/);
+  const match=raw.match(/^(\d{4})[-/]?(\d{2})[-/]?(\d{2})/);
   if (!match) return null;
   const day=match[1]+"-"+match[2]+"-"+match[3];
   const stamp=Date.parse(day+"T00:00:00Z");
@@ -948,7 +948,7 @@ async function stooqBrentPrice() {
     signal:AbortSignal.timeout(12000)
   });
   if(!r.ok)throw Error("Stooq oil HTTP "+r.status);
-  const lines=(await r.text()).trim().split(/\\r?\\n/);
+  const lines=(await r.text()).trim().split(/\r?\n/);
   if(lines.length<2)throw Error("Stooq oil CSV unavailable");
   const headers=lines[0].split(",").map(x=>x.trim().toLowerCase());
   const data=lines[1].split(",").map(x=>x.trim());
