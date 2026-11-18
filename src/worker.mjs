@@ -1072,9 +1072,15 @@ async function prices(env) {
   let cached = null;
   try { cached = await readPriceCache(env); }
   catch (e) { console.log("Price cache read failed: " + String(e.message)); }
-  if (cached && Object.hasOwn(cached,"oil") &&
-      Date.now() - Date.parse(cached.at) < PRICE_READ_MAX_AGE_MS)
-    return visibleSnapshot(cached);
+  if (cached && Object.hasOwn(cached,"oil")) {
+    const age=Date.now()-Date.parse(cached.at);
+    const visible=visibleSnapshot(cached);
+    // Recover from a recently failed Cron fetch: a cached null quote must not
+    // hide a now-healthy Brent feed for the full normal 15-minute cache window.
+    // Keep a 90-second cool-down to avoid hammering a failing provider.
+    if (age < PRICE_READ_MAX_AGE_MS &&
+        (validPriceQuote(visible.oil) || age < 90*1000)) return visible;
+  }
   try { return await refreshPriceSnapshot(env); }
   catch (e) {
     console.log("Price refresh failed; returning last safe snapshot: " + String(e.message));
