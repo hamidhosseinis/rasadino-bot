@@ -1,0 +1,25 @@
+name: Rasadino Music Search preflight (read-only)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feature/music-stage3-20261118"]
+    paths:
+      - "scripts/music-search-preflight.mjs"
+      - "src/music/providers.mjs"
+      - ".github/workflows/music-search-preflight.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  music-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Try keyless provider search metadata
+        run: node scripts/music-search-preflight.mjs
