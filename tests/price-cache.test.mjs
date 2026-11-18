@@ -28,6 +28,7 @@ function interceptFetch(t) {
   const original=globalThis.fetch;
   const calls=[];
   let failTgju=false;
+  let failOil=false;
   globalThis.fetch=async (url,opts={})=>{
     const target=String(url);
     calls.push(target);
@@ -37,6 +38,17 @@ function interceptFetch(t) {
     if(target.includes("api.coingecko.com")) {
       return {ok:true,status:200,json:async()=>({bitcoin:{usd:100000}})};
     }
+    if(target.includes("stooq.com/q/l/")) {
+      if(failOil) throw Error("Simulated Stooq oil outage");
+      return {ok:true,status:200,text:async()=>(
+        "Symbol,Date,Time,Open,High,Low,Close,Volume\n"+
+        "CB.F,"+new Date().toISOString().slice(0,10).replace(/-/g,"")+
+        ",10:00:00,90.1,91.2,89.5,90.5,10000\n")};
+    }
+    if(target.includes("americasoilwatch.com/api/v1/brent")) {
+      if(failOil) throw Error("Simulated AmericasOilWatch outage");
+      return {ok:true,status:200,json:async()=>({price:91.5,date:new Date().toISOString().slice(0,10)})};
+    }
     if(target.includes("tgju.org/profile/")) {
       if(failTgju) throw Error("Simulated TGJU outage");
       return {ok:true,status:200,text:async()=>
@@ -45,7 +57,7 @@ function interceptFetch(t) {
     throw Error("Unexpected request: "+target);
   };
   t.after(()=>{globalThis.fetch=original});
-  return {calls,setTgjuFailure(value){failTgju=value;}};
+  return {calls,setTgjuFailure(value){failTgju=value;},setOilFailure(value){failOil=value;}};
 }
 
 async function trigger(e,cron,scheduledTime=Date.now()) {
@@ -65,10 +77,15 @@ test("10-minute Cron refreshes KV without any Telegram broadcast",async t=>{
   assert.ok(snapshot.btc.updatedAt);
   assert.ok(snapshot.usdt.updatedAt);
   assert.ok(snapshot.gold.updatedAt);
-  assert.ok(snapshot.usd.updatedAt);
+  assert.ok(snapshot.oil.updatedAt);
+  assert.equal(snapshot.oil.value,90.5);
+  assert.ok(snapshot.oil.marketDate);
+  assert.equal(snapshot.usd,undefined);
   assert.equal(calls.filter(x=>x.includes("api.telegram.org")).length,0);
   assert.equal(calls.filter(x=>x.includes("coingecko")).length,1);
-  assert.equal(calls.filter(x=>x.includes("tgju.org/profile/")).length,3);
+  assert.equal(calls.filter(x=>x.includes("tgju.org/profile/")).length,2);
+  assert.equal(calls.filter(x=>x.includes("stooq.com")).length,1);
+  assert.equal(calls.filter(x=>x.includes("price_dollar_rl")).length,0);
 });
 
 test("on-demand API and Telegram requests reuse the saved snapshot",async t=>{
@@ -80,8 +97,10 @@ test("on-demand API and Telegram requests reuse the saved snapshot",async t=>{
   assert.equal(response.status,200);
   const json=await response.json();
   assert.equal(json.quotes.btc.value,100000);
-  assert.ok(json.quotes.usd.value>0);
-  assert.match(json.report,/دلار آزاد/);
+  assert.ok(json.quotes.oil.value>0);
+  assert.equal(json.quotes.usd,undefined);
+  assert.match(json.report,/نفت خام برنت/);
+  assert.doesNotMatch(json.report,/دلار آزاد/);
   assert.match(json.report,/۱۳۵۷/);
   assert.equal(json.quotes.btc.stale,false);
   const update={update_id:42,message:{chat:{type:"private",id:555},from:{id:555},text:"/price"}};
@@ -105,8 +124,8 @@ test("a provider outage preserves recent quotes per asset",async t=>{
   assert.equal(next.usdt.value,initial.usdt.value);
   assert.equal(next.gold.value,initial.gold.value);
   assert.equal(next.gold.updatedAt,initial.gold.updatedAt);
-  assert.equal(next.usd.value,initial.usd.value);
-  assert.equal(next.usd.updatedAt,initial.usd.updatedAt);
+  assert.equal(next.oil.value,initial.oil.value);
+  assert.equal(next.oil.updatedAt,initial.oil.updatedAt);
 });
 
 test("quotes over 20 minutes old are not shown as current",async t=>{
@@ -119,14 +138,16 @@ test("quotes over 20 minutes old are not shown as current",async t=>{
     btc:{value:80000,source:"CoinGecko",updatedAt:old},
     usdt:{value:100000,source:"TGJU",updatedAt:old},
     gold:{value:6000000,source:"TGJU",updatedAt:old},
-    usd:{value:100000,source:"TGJU",updatedAt:old}};
+    usd:{value:100000,source:"TGJU",updatedAt:old},
+    oil:{value:90.5,source:"Stooq CB.F",marketDate:new Date().toISOString().slice(0,10),updatedAt:old}};
   e.STATE.data.set("prices:latest:v1",JSON.stringify(snapshot));
   const visible=await prices(e);
   assert.equal(visible.btc.value,null);
   assert.equal(visible.usdt.value,null);
   assert.equal(visible.gold.value,null);
-  assert.equal(visible.usd.value,null);
-  assert.equal(visible.usd.stale,true);
+  assert.equal(visible.oil.value,null);
+  assert.equal(visible.oil.stale,true);
+  assert.equal(visible.usd,undefined);
   assert.equal(visible.btc.stale,true);
   assert.equal(calls.length,0);
 });
