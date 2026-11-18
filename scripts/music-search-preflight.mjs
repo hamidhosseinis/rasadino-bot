@@ -44,6 +44,10 @@ try {
     official_link_accepted:Boolean(officialLink(first.permalink,"audius")),
     normalized:Boolean(normalizeAudius(first)),
     permalink_is_absolute:typeof first.permalink==="string" && first.permalink.startsWith("https://"),
-    permalink_host:(()=>{try{return new URL(first.permalink).host}catch{return "not_absolute"}})()
+    permalink_host:(()=>{try{return new URL(first.permalink).host}catch{return "not_absolute"}})(),
+    permalink_prefix_character:typeof first.permalink==="string" ? first.permalink.slice(0,1) : null,
+    permalink_has_slash:typeof first.permalink==="string" && first.permalink.includes("/"),
+    permalink_has_colon:typeof first.permalink==="string" && first.permalink.includes(":"),
+    permalink_length:typeof first.permalink==="string" ? first.permalink.length : null
   }));
 }catch(e){console.log("audius_response_shape: unavailable ("+(e?.name??"network")+")");}
