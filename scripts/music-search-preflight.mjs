@@ -22,3 +22,21 @@ for(const [label,run] of tasks) {
   await new Promise(resolve=>setTimeout(resolve,1200));
 }
 console.log("Search metadata providers verified: "+ok+"/"+tasks.length);
+
+
+try {
+  const raw=await fetch("https://api.audius.co/v1/tracks/search?query=music&limit=3&app_name=Rasadino",{
+    headers:{"Accept":"application/json"},signal:AbortSignal.timeout(7500)
+  });
+  const data=await raw.json();
+  const list=Array.isArray(data?.data)?data.data:[];
+  const first=list[0]??{};
+  // Diagnostics log only object shape, never track titles, user handles or URLs.
+  console.log("audius_response_shape: "+JSON.stringify({
+    http_status:raw.status,
+    data_count:list.length,
+    top_level_keys:Object.keys(data??{}).slice(0,10),
+    item_field_types:Object.fromEntries(["id","title","permalink","user","genre"].map(k=>[k,typeof first[k]])),
+    user_field_types:Object.fromEntries(["name","handle"].map(k=>[k,typeof first.user?.[k]]))
+  }));
+}catch(e){console.log("audius_response_shape: unavailable ("+(e?.name??"network")+")");}
