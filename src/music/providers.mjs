@@ -4,7 +4,8 @@ const SAFE_HTTPS = /^https:\/\//i;
 export function officialLink(raw, provider) {
   if (typeof raw !== "string" || raw.length > 1300 || /[\u0000-\u001f\u007f-\u009f]/.test(raw)) return null;
   const isAudiusRelative = provider === "audius" &&
-    /^\/(?!\/)[^\\\s?#]{2,1000}$/.test(raw);
+    /^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f-\u009f]{2,1000}$/.test(raw) &&
+    !/%(?:0[0-9a-f]|1[0-9a-f]|7f)/i.test(raw);
   if (!SAFE_HTTPS.test(raw) && !isAudiusRelative) return null;
   try {
     // The Audius REST API currently returns root-relative permalinks such as
