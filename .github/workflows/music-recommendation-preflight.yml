@@ -1,0 +1,26 @@
+name: Rasadino music stage 6 — provider preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feature/music-stage6-recommendations-20261118"]
+    paths:
+      - "scripts/music-recommendation-preflight.mjs"
+      - "src/music/providers.mjs"
+      - "src/music/recommendations.mjs"
+      - ".github/workflows/music-recommendation-preflight.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  metadata-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check source-backed recommendation queries (no secrets)
+        run: node scripts/music-recommendation-preflight.mjs
