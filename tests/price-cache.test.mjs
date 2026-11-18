@@ -29,7 +29,8 @@ function interceptFetch(t) {
   const calls=[];
   let failTgju=false;
   let failOil=false;
-  let failStooqOnly=false;
+  let failPrimaryOnly=false;
+  let failFredOnly=false;
   globalThis.fetch=async (url,opts={})=>{
     const target=String(url);
     calls.push(target);
@@ -39,16 +40,29 @@ function interceptFetch(t) {
     if(target.includes("api.coingecko.com")) {
       return {ok:true,status:200,json:async()=>({bitcoin:{usd:100000}})};
     }
-    if(target.includes("stooq.com/q/l/")) {
-      if(failOil||failStooqOnly) throw Error("Simulated Stooq oil outage");
-      return {ok:true,status:200,text:async()=>(
-        "Symbol,Date,Time,Open,High,Low,Close,Volume\n"+
-        "CB.F,"+new Date().toISOString().slice(0,10).replace(/-/g,"")+
-        ",10:00:00,90.1,91.2,89.5,90.5,10000\n")};
-    }
     if(target.includes("americasoilwatch.com/api/v1/brent")) {
-      if(failOil) throw Error("Simulated AmericasOilWatch outage");
-      return {ok:true,status:200,json:async()=>({price:91.5,date:new Date().toISOString().slice(0,10)})};
+      if(failOil||failPrimaryOnly) throw Error("Simulated AmericasOilWatch outage");
+      return {ok:true,status:200,json:async()=>({
+        lastUpdated:new Date().toISOString(),
+        observedAt:new Date().toISOString(),
+        sessionDate:new Date().toISOString().slice(0,10),
+        quoteType:"intraday",quoteStatus:"current",
+        provider:"Yahoo Finance (BZF27.NYM)",priceUsd:93.33,
+        dataSource:"Yahoo Finance (BZF27.NYM)"
+      })};
+    }
+    if(target.includes("fred.stlouisfed.org/graph/fredgraph.csv")) {
+      if(failOil||failFredOnly) throw Error("Simulated FRED outage");
+      const day=new Date(Date.now()-2*86400000).toISOString().slice(0,10);
+      return {ok:true,status:200,text:async()=>(
+        "observation_date,DCOILBRENTEU\n"+day+",92.14\n"+
+        new Date().toISOString().slice(0,10)+",.\n")};
+    }
+    if(target.includes("raw.githubusercontent.com/datasets/oil-prices/")) {
+      if(failOil) throw Error("Simulated GitHub public oil mirror outage");
+      const day=new Date(Date.now()-86400000).toISOString().slice(0,10);
+      return {ok:true,status:200,text:async()=>(
+        "Date,Price\r\n"+day+",91.86\r\n")};
     }
     if(target.includes("tgju.org/profile/")) {
       if(failTgju) throw Error("Simulated TGJU outage");
@@ -58,7 +72,7 @@ function interceptFetch(t) {
     throw Error("Unexpected request: "+target);
   };
   t.after(()=>{globalThis.fetch=original});
-  return {calls,setTgjuFailure(value){failTgju=value;},setOilFailure(value){failOil=value;},setStooqOnlyFailure(value){failStooqOnly=value;}};
+  return {calls,setTgjuFailure(value){failTgju=value;},setOilFailure(value){failOil=value;},setPrimaryFailure(value){failPrimaryOnly=value;},setFredFailure(value){failFredOnly=value;}};
 }
 
 async function trigger(e,cron,scheduledTime=Date.now()) {
@@ -79,13 +93,15 @@ test("10-minute Cron refreshes KV without any Telegram broadcast",async t=>{
   assert.ok(snapshot.usdt.updatedAt);
   assert.ok(snapshot.gold.updatedAt);
   assert.ok(snapshot.oil.updatedAt);
-  assert.equal(snapshot.oil.value,90.5);
+  assert.equal(snapshot.oil.value,93.33);
+  assert.equal(snapshot.oil.oilType,"futures");
   assert.ok(snapshot.oil.marketDate);
   assert.equal(snapshot.usd,undefined);
   assert.equal(calls.filter(x=>x.includes("api.telegram.org")).length,0);
   assert.equal(calls.filter(x=>x.includes("coingecko")).length,1);
   assert.equal(calls.filter(x=>x.includes("tgju.org/profile/")).length,2);
-  assert.equal(calls.filter(x=>x.includes("stooq.com")).length,1);
+  assert.equal(calls.filter(x=>x.includes("americasoilwatch.com")).length,1);
+  assert.equal(calls.filter(x=>x.includes("stooq.com")).length,0);
   assert.equal(calls.filter(x=>x.includes("price_dollar_rl")).length,0);
 });
 
@@ -168,23 +184,45 @@ test("only the old 10:00/22:00 Iran triggers send scheduled prices",async t=>{
   assert.equal(calls.filter(x=>x.includes("/sendMessage")).length,2);
 });
 
-test("fallback API supplies dated Brent price when Stooq fails",async t=>{
+test("real-shaped primary global Brent API returns dated futures price",async t=>{
   const api=interceptFetch(t);
   const e=makeEnv();
-  api.setStooqOnlyFailure(true);
   const q=await refreshPriceSnapshot(e);
-  assert.equal(q.oil.value,91.5);
-  assert.equal(q.oil.source,"AmericasOilWatch");
+  assert.equal(q.oil.value,93.33);
+  assert.equal(q.oil.source,"AmericasOilWatch / Brent Futures");
+  assert.equal(q.oil.oilType,"futures");
   assert.equal(q.oil.marketDate,new Date().toISOString().slice(0,10));
-  assert.equal(api.calls.filter(x=>x.includes("stooq.com")).length,1);
   assert.equal(api.calls.filter(x=>x.includes("americasoilwatch.com")).length,1);
+  assert.equal(api.calls.filter(x=>x.includes("fred.stlouisfed.org")).length,0);
+});
+test("if live Brent feed fails, EIA/FRED returns its recent dated spot",async t=>{
+  const api=interceptFetch(t);
+  const e=makeEnv();
+  api.setPrimaryFailure(true);
+  const q=await refreshPriceSnapshot(e);
+  assert.equal(q.oil.value,92.14);
+  assert.equal(q.oil.source,"EIA via FRED");
+  assert.equal(q.oil.oilType,"spot");
+  assert.equal(q.oil.marketDate,new Date(Date.now()-2*86400000).toISOString().slice(0,10));
+  assert.equal(api.calls.filter(x=>x.includes("fred.stlouisfed.org")).length,1);
+});
+test("a third independent CSV mirror prevents missing oil if two feeds fail",async t=>{
+  const api=interceptFetch(t);
+  const e=makeEnv();
+  api.setPrimaryFailure(true);
+  api.setFredFailure(true);
+  const q=await refreshPriceSnapshot(e);
+  assert.equal(q.oil.value,91.86);
+  assert.equal(q.oil.source,"EIA via GitHub mirror");
+  assert.equal(q.oil.oilType,"spot");
+  assert.equal(api.calls.filter(x=>x.includes("raw.githubusercontent.com")).length,1);
 });
 
 test("a stale oil market date is not misrepresented as today's price",async t=>{
   const {calls}=interceptFetch(t);
   const e=makeEnv();
   const current=new Date().toISOString();
-  const oldDay=new Date(Date.now()-9*86400000).toISOString().slice(0,10);
+  const oldDay=new Date(Date.now()-17*86400000).toISOString().slice(0,10);
   e.STATE.data.set("prices:latest:v1",JSON.stringify({at:current,
     btc:{value:100000,source:"CoinGecko",updatedAt:current},
     gold:{value:5000000,source:"TGJU",updatedAt:current},
@@ -197,4 +235,26 @@ test("a stale oil market date is not misrepresented as today's price",async t=>{
   assert.equal(snapshot.oil.stale,true);
   assert.equal(snapshot.usd,undefined);
   assert.equal(calls.length,0);
+});
+
+test("saved oil quote survives short outages but visibly signals delay",async t=>{
+  const {calls}=interceptFetch(t);
+  const e=makeEnv();
+  const now=new Date().toISOString();
+  const oldUpdatedAt=new Date(Date.now()-2*3600000).toISOString();
+  e.STATE.data.set("prices:latest:v1",JSON.stringify({at:now,
+    btc:{value:90000,source:"CoinGecko",updatedAt:now},
+    gold:{value:5000000,source:"TGJU",updatedAt:now},
+    usdt:{value:100000,source:"TGJU",updatedAt:now},
+    oil:{value:93.33,source:"AmericasOilWatch / Brent Futures",
+      marketDate:new Date().toISOString().slice(0,10),oilType:"futures",updatedAt:oldUpdatedAt}
+  }));
+  const quote=await prices(e);
+  assert.equal(quote.oil.value,93.33);
+  assert.equal(quote.oil.delayed,true);
+  assert.equal(calls.length,0);
+  const response=await worker.fetch(new Request("https://example.invalid/prices"),e);
+  const body=await response.json();
+  assert.match(body.report,/آخرین نرخ ذخیره‌شده/);
+  assert.match(body.report,/📅 تاریخ نرخ جهانی/);
 });
