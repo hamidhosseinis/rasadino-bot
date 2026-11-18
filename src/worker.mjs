@@ -384,6 +384,31 @@ async function deliverScheduledReport(env, chatId, owner, slot, message) {
 }
 
 
+const MUSIC_PENDING_PREFIX = "music:pending:";
+async function clearPendingMusic(env,chatId) {
+  const key=MUSIC_PENDING_PREFIX+chatId;
+  if (await env.STATE.get(key)) await env.STATE.delete(key);
+}
+async function performMusicSearch(env,chatId,language,query) {
+  if (!validateMusicQuery(language,query)) {
+    const page=renderMusicSearch({status:"invalid"},language);
+    return send(env,chatId,page.text,page.keyboard);
+  }
+  try {
+    if (!await checkMusicSearchRate(env,chatId)) {
+      const page=musicMenuView("music:search:"+language);
+      return send(env,chatId,"⏳ برای جلوگیری از درخواست‌های تکراری، چند ثانیه بعد دوباره جست‌وجو کن.",page.keyboard);
+    }
+    const result=await searchMusic(env,{language,query});
+    const page=renderMusicSearch(result,language);
+    return send(env,chatId,page.text,page.keyboard);
+  } catch {
+    console.log("Music metadata search failed (details withheld)");
+    const page=renderMusicSearch({status:"unavailable"},language);
+    return send(env,chatId,page.text,page.keyboard);
+  }
+}
+
 async function onCallbackQuery(query,env) {
   if(!query || typeof query.data!=="string" || !query.id)return;
   const chatId=String(query.message?.chat?.id||"");
@@ -398,15 +423,22 @@ async function onCallbackQuery(query,env) {
   const messageId=query.message?.message_id||null;
   const action=query.data;
   if(action==="main:menu"){
+    await clearPendingMusic(env,chatId);
     return showMainMenu(env,chatId,messageId);
   }
   if(action==="menu:close"){
+    await clearPendingMusic(env,chatId);
     return renderMenu(env,chatId,
       "✅ منو بسته شد. هر زمان خواستی، دستور /menu یا /start را بفرست.",
       {inline_keyboard:[]},messageId);
   }
   if(action.startsWith("music:")){
     const page=musicMenuView(action) ?? musicMenuView();
+    if(/^music:search:(fa|us)$/.test(action)) {
+      await env.STATE.put(MUSIC_PENDING_PREFIX+chatId,action.slice(-2),{expirationTtl:300});
+    } else {
+      await clearPendingMusic(env,chatId);
+    }
     return renderMenu(env,chatId,page.text,page.keyboard,messageId);
   }
   if(action==="price:menu")return showPriceMenu(env,chatId,messageId);
@@ -1223,6 +1255,7 @@ async function onTelegram(update, env) {
   await removeLegacyKeyboardOnce(env,chatId);
 
   if(cmd==="/start" || cmd==="/menu" || line==="🚀 شروع"){
+    await clearPendingMusic(env,chatId);
     return showMainMenu(env,chatId,null,
       user.notifications_enabled?"🔔 اعلان قیمت فعال است.":"🔕 برای فعال‌سازی اعلان قیمت: /subscribe");
   }
@@ -1235,30 +1268,15 @@ async function onTelegram(update, env) {
   if(cmd==="/news" || line==="📰 اخبار")
     return sendGolestanNews(env,chatId,true,0);
   if(cmd==="/music" || line==="🎧 رصد موزیک"){
+    await clearPendingMusic(env,chatId);
     const page=musicMenuView();
     return send(env,chatId,page.text,page.keyboard);
   }
   if(cmd==="/findmusic"){
+    await clearPendingMusic(env,chatId);
     const matched=line.match(/^\/findmusic(?:@[a-zA-Z0-9_]+)?\s+(fa|us)\s+(.+)$/i);
     const language=matched?.[1]?.toLowerCase() || "fa";
-    const query=matched?.[2] || "";
-    if (!validateMusicQuery(language,query)) {
-      const page=renderMusicSearch({status:"invalid"},language);
-      return send(env,chatId,page.text,page.keyboard);
-    }
-    try {
-      if (!await checkMusicSearchRate(env,chatId)) {
-        const page=musicMenuView("music:search:"+language);
-        return send(env,chatId,"⏳ برای جلوگیری از درخواست‌های تکراری، چند ثانیه بعد دوباره جست‌وجو کن.",page.keyboard);
-      }
-      const result=await searchMusic(env,{language,query});
-      const page=renderMusicSearch(result,language);
-      return send(env,chatId,page.text,page.keyboard);
-    } catch(e) {
-      console.log("Music metadata search failed (details withheld)");
-      const page=renderMusicSearch({status:"unavailable"},language);
-      return send(env,chatId,page.text,page.keyboard);
-    }
+    return performMusicSearch(env,chatId,language,matched?.[2] || "");
   }
   if(cmd==="/support" || line==="💬 پشتیبان")
     return showSupport(env,chatId);
@@ -1281,6 +1299,13 @@ async function onTelegram(update, env) {
     return send(env,chatId,
       "⏸ اعلان‌های زمان‌بندی‌شده فقط برای حساب شما متوقف شد.\nبرای دریافت دوباره: /subscribe\nقیمت، هواشناسی و اخبار همچنان فعال است.",
       simpleBackKeyboard());
+  }
+  if (!line.startsWith("/")) {
+    const pending=await env.STATE.get(MUSIC_PENDING_PREFIX+chatId);
+    if (pending==="fa" || pending==="us") {
+      await env.STATE.delete(MUSIC_PENDING_PREFIX+chatId);
+      return performMusicSearch(env,chatId,pending,line);
+    }
   }
   return showMainMenu(env,chatId,null,"👇 از دکمه‌های زیر استفاده کن.");
 }
