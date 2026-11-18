@@ -2,6 +2,14 @@
 const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
 const TETHER_URL = "https://www.tgju.org/profile/crypto-tether";
+const DOLLAR_URL = "https://www.tgju.org/profile/price_dollar_rl";
+
+// Historical estimates, not observed retail prices on 1 Farvardin 1357.
+// Approx. USD = 7 tomans in early 1357; gold fixing = $177.25/oz on 21 Mar 1978.
+// First published BTC/USD rate on 5 Oct 2009: 1 USD = 1309.03 BTC.
+const HISTORICAL_USD_TOMAN = 7;
+const HISTORICAL_GOLD18_TOMAN = 177.25 * HISTORICAL_USD_TOMAN * 0.75 / 31.1034768;
+const HISTORICAL_BTC_USD = 1 / 1309.03;
 
 // The existing persistent KV stores a snapshot updated every ten minutes.
 const PRICE_CACHE_KEY = "prices:latest:v1";
@@ -32,8 +40,9 @@ const BACK_CLOSE = [
 ];
 function priceMenuKeyboard() {
   return {inline_keyboard:[
-    [{text:"₿ بیت‌کوین",callback_data:"price:btc"}, {text:"💵 تتر",callback_data:"price:usdt"}],
-    [{text:"🥇 طلای ۱۸ عیار",callback_data:"price:gold"}, {text:"📊 همه قیمت‌ها",callback_data:"price:all"}],
+    [{text:"₿ بیت‌کوین",callback_data:"price:btc"}, {text:"💵 دلار آزاد",callback_data:"price:usd"}],
+    [{text:"💲 تتر",callback_data:"price:usdt"}, {text:"🥇 طلای ۱۸ عیار",callback_data:"price:gold"}],
+    [{text:"📊 همه قیمت‌ها",callback_data:"price:all"}],
     [{text:"🔄 تازه‌سازی همه قیمت‌ها",callback_data:"price:refresh"}],
     ...BACK_CLOSE
   ]};
@@ -82,13 +91,14 @@ async function removeLegacyKeyboardOnce(env,chatId) {
 }
 function priceViewText(pr,asset="all") {
   const names = {
-    btc:"₿ بیت‌کوین: "+money(pr.btc,"USD"),
-    usdt:"💵 تتر (USDT): "+money(pr.usdt,"IRR"),
-    gold:"🥇 هر گرم طلای ۱۸ عیار: "+money(pr.gold,"IRR")
+    btc:priceLine(pr.btc,"btc"),
+    usd:priceLine(pr.usd,"usd"),
+    usdt:priceLine(pr.usdt,"usdt"),
+    gold:priceLine(pr.gold,"gold")
   };
   if(asset==="all")return report(pr);
   return "💰 آخرین قیمت ثبت‌شده\n\n"+names[asset]+
-    "\n\n🕒 آخرین دریافت معتبر: "+(pr[asset].updatedAt
+    "\n\nℹ️ مبنای سال ۱۳۵۷ تقریبی و درصدها اسمی‌اند؛ جزئیات در 📚 منابع.\n\n🕒 آخرین دریافت معتبر: "+(pr[asset]?.updatedAt
       ? new Intl.DateTimeFormat("fa-IR",{
           timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
         }).format(new Date(pr[asset].updatedAt))
@@ -114,7 +124,7 @@ function welcome() {
     "👋 به رصدینو | Rasadino خوش آمدی!",
     "",
     "📡 رصدینو دستیار هوشمند رصد اطلاعات و اعلان‌هاست.",
-    "💰 با دکمه «قیمت» نرخ بیت‌کوین، تتر و طلای ۱۸ عیار را ببین.",
+    "💰 با دکمه «قیمت» نرخ بیت‌کوین، دلار آزاد، تتر و طلای ۱۸ عیار و رشد تاریخی آن‌ها را ببین.",
     "🕙 گزارش خودکار بازار ساعت ۱۰ صبح و ۱۰ شب، فقط برای کاربران دارای اشتراک اعلان ارسال می‌شود.",
     "🌤 آب و هوای ۶ شهر منتخب و 📰 اخبار استان گلستان آماده‌اند.",
     "📚 برای دیدن منابع قیمت و هواشناسی، دکمه «منابع» را بزن.",
@@ -382,7 +392,7 @@ async function onCallbackQuery(query,env) {
       {inline_keyboard:[]},messageId);
   }
   if(action==="price:menu")return showPriceMenu(env,chatId,messageId);
-  if(["price:btc","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
+  if(["price:btc","price:usd","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
     const asset=action==="price:refresh"?"all":action.slice(6);
     return renderMenu(env,chatId,priceViewText(await prices(env),asset),priceResultKeyboard(),messageId);
   }
@@ -877,14 +887,14 @@ async function tgjuRial(url, label) {
   const html = await response.text();
   if (html.length < 250) throw new Error("TGJU HTML empty");
   const text = toText(html);
-  const pattern = label === "gold"
+  const pattern = label === "gold" || label === "dollar"
     ? /نرخ\s*فعلی\s*[:：]*\s*([0-9۰-۹٠-٩٬,.]+)/u
     : /قیمت\s*ریالی\s*[:：]*\s*([0-9۰-۹٠-٩٬,.]+)/u;
   const m = text.match(pattern);
   if (!m) throw new Error("TGJU price not found");
   const rial = Number(latinNumber(m[1]));
   if (!Number.isFinite(rial) || (label === "gold" && (rial < 1000000 || rial > 10000000000))
-      || (label === "tether" && (rial < 10000 || rial > 100000000))) {
+      || ((label === "tether" || label === "dollar") && (rial < 10000 || rial > 100000000))) {
     throw new Error("TGJU invalid range");
   }
   return {value: rial / 10, source: "TGJU", url};
@@ -911,12 +921,13 @@ async function quote(task) {
   catch (e) { console.log("Quote unavailable: " + String(e.message)); return {value: null, source: "unavailable"}; }
 }
 async function fetchPriceQuotes() {
-  const [btc, usdt, gold] = await Promise.all([
+  const [btc, usdt, gold, usd] = await Promise.all([
     quote(btcPrice),
     quote(() => tgjuRial(TETHER_URL, "tether")),
-    quote(() => tgjuRial(GOLD_URL, "gold"))
+    quote(() => tgjuRial(GOLD_URL, "gold")),
+    quote(() => tgjuRial(DOLLAR_URL, "dollar"))
   ]);
-  return {btc, usdt, gold};
+  return {btc, usdt, gold, usd};
 }
 function validPriceQuote(item) {
   return item && typeof item.value === "number" && Number.isFinite(item.value) && item.value > 0;
@@ -945,7 +956,8 @@ function visibleSnapshot(item) {
   return {...item,
     btc:visibleQuote(item.btc,now),
     usdt:visibleQuote(item.usdt,now),
-    gold:visibleQuote(item.gold,now)};
+    gold:visibleQuote(item.gold,now),
+    usd:visibleQuote(item.usd,now)};
 }
 // Refresh providers independently, preserving each last successful quote.
 async function refreshPriceSnapshot(env) {
@@ -955,7 +967,7 @@ async function refreshPriceSnapshot(env) {
   const fresh = await fetchPriceQuotes();
   const at = new Date().toISOString();
   const merged = {};
-  for (const asset of ["btc","usdt","gold"]) {
+  for (const asset of ["btc","usdt","gold","usd"]) {
     merged[asset] = validPriceQuote(fresh[asset])
       ? {...fresh[asset], updatedAt:at}
       : (validPriceQuote(previous?.[asset]) ? previous[asset]
@@ -983,6 +995,31 @@ function money(item, currency) {
   return !validPriceQuote(item) ? "در دسترس نیست" :
     new Intl.NumberFormat("fa-IR", {maximumFractionDigits: currency === "USD" ? 2 : 0}).format(item.value) + " " + (currency === "USD" ? "دلار" : "تومان");
 }
+// Nominal growth: not inflation adjusted; unavailable quotes never yield a percentage.
+function historicalGrowthPercent(item, base) {
+  if (!validPriceQuote(item) || !Number.isFinite(base) || base <= 0) return null;
+  return (item.value / base - 1) * 100;
+}
+function growthText(item, base) {
+  const percent = historicalGrowthPercent(item, base);
+  if (percent === null || !Number.isFinite(percent)) return "در دسترس نیست";
+  const amount = new Intl.NumberFormat("fa-IR",{maximumFractionDigits:0}).format(Math.abs(percent));
+  return (percent >= 0 ? "↗ +" : "↘ −") + amount + "٪";
+}
+function priceLine(item, asset) {
+  const data = {
+    btc:{title:"₿ بیت‌کوین",currency:"USD",baseline:HISTORICAL_BTC_USD,
+      note:"رشد از اولین نرخ دلاری ثبت‌شده (۵ اکتبر ۲۰۰۹)"},
+    usd:{title:"💵 دلار آزاد",currency:"IRR",baseline:HISTORICAL_USD_TOMAN,
+      note:"رشد از حدود ۷ تومان در ابتدای ۱۳۵۷"},
+    usdt:{title:"💲 تتر (USDT)",currency:"IRR",baseline:HISTORICAL_USD_TOMAN,
+      note:"قیاس با دلار ابتدای ۱۳۵۷ (تتر آن زمان وجود نداشت)"},
+    gold:{title:"🥇 هر گرم طلای ۱۸ عیار",currency:"IRR",baseline:HISTORICAL_GOLD18_TOMAN,
+      note:"رشد از برآورد حدود ۳۰ تومان در ابتدای ۱۳۵۷"}
+  }[asset];
+  if (!data) return "قیمت نامشخص";
+  return data.title+": "+money(item,data.currency)+"\n  📈 "+data.note+": "+growthText(item,data.baseline);
+}
 function report(pr) {
   const date = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
     timeZone: TIMEZONE, dateStyle: "full", timeStyle: "short"
@@ -991,10 +1028,15 @@ function report(pr) {
     "📊 گزارش قیمت بازار",
     "🗓 آخرین بررسی: " + date,
     "",
-    "₿ بیت‌کوین: " + money(pr.btc, "USD"),
-    "💵 تتر (USDT): " + money(pr.usdt, "IRR"),
-    "🥇 هر گرم طلای ۱۸ عیار: " + money(pr.gold, "IRR"),
+    priceLine(pr.btc,"btc"),
     "",
+    priceLine(pr.usd,"usd"),
+    "",
+    priceLine(pr.usdt,"usdt"),
+    "",
+    priceLine(pr.gold,"gold"),
+    "",
+    "ℹ️ درصدها اسمی و مبنای ابتدای ۱۳۵۷ تقریبی است؛ روش و منابع در 📚 منابع.",
     "قیمت‌ها هر ۱۰ دقیقه بررسی می‌شوند؛ نرخ قدیمی‌تر از ۲۰ دقیقه نمایش داده نمی‌شود."
   ].join("\n");
 }
@@ -1012,11 +1054,25 @@ function sourcesMessage() {
     "در صورت اختلال CoinGecko: Coinbase — منبع جایگزین",
     "https://www.coinbase.com/price/bitcoin",
     "",
-    "💵 تتر (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
+    "💵 دلار آزاد (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
+    DOLLAR_URL,
+    "",
+    "💲 تتر (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
     TETHER_URL,
     "",
     "🥇 طلای ۱۸ عیار (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
     GOLD_URL,
+    "",
+    "📈 روش درصد رشد: (قیمت فعلی ÷ قیمت مبنا − ۱) × ۱۰۰",
+    "رشدها اسمی‌اند و تورم‌زدایی نشده‌اند.",
+    "مبنای ابتدای ۱۳۵۷ (۱ فروردین = ۲۱ مارس ۱۹۷۸):",
+    "• دلار: حدود ۷ تومان؛ نرخ دقیق دادوستد آن روز در دست نیست و مبنا برآوردی است.",
+    "https://factnameh.com/fa/fact-checks/2018-02-16-dollar-iran-currency",
+    "• طلای ۱۸ عیار: حدود ۳۰ تومان برای هر گرم؛ برآورد از قیمت ۱۷۷٫۲۵ دلار برای اونس جهانی در ۲۱ مارس ۱۹۷۸، دلار حدود ۷ تومان و عیار ۷۵٪.",
+    "https://sdbullion.com/gold-prices-1978",
+    "• بیت‌کوین: اولین نرخ دلاری ثبت‌شده در ۵ اکتبر ۲۰۰۹؛ یک دلار = ۱٬۳۰۹٫۰۳ بیت‌کوین (حدود ۰٫۰۰۰۷۶۴ دلار برای هر بیت‌کوین).",
+    "https://nakamotoinstitute.org/library/on-the-origins-of-bitcoin/",
+    "• تتر در ۱۳۵۷ وجود نداشت؛ رشد آن فقط قیاس قیمت امروز با دلار تاریخی است.",
     "",
     "ℹ️ قیمت‌ها و پیش‌بینی‌ها وابسته به دسترسی و زمان به‌روزرسانی سرویس‌های بالا هستند؛ برای تصمیم‌های حساس، داده‌ها را با منبع اصلی تطبیق بده."
   ].join("\n");
@@ -1072,7 +1128,7 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنمای رصدینو\n💰 قیمت‌ها: نرخ بیت‌کوین، تتر و طلای ۱۸ عیار\n🌤 آب‌وهوا: پیش‌بینی شش شهر گلستان\n📚 منابع: مراجع قیمت و هواشناسی\n📰 اخبار: تیترها و جزئیات ۴۸ ساعت اخیر گلستان\n💬 پشتیبانی: گفتگو با @hamidhosseinis\n\nبازکردن منو: /menu\nاعلان قیمت اختیاری و شخصی است.\nدستورات: /start /menu /price /weather /sources /news /support /subscribe /status /stop",
+      "📖 راهنمای رصدینو\n💰 قیمت‌ها: بیت‌کوین، دلار آزاد، تتر و طلای ۱۸ عیار با رشد تاریخی\n🌤 آب‌وهوا: پیش‌بینی شش شهر گلستان\n📚 منابع: مراجع قیمت و هواشناسی\n📰 اخبار: تیترها و جزئیات ۴۸ ساعت اخیر گلستان\n💬 پشتیبانی: گفتگو با @hamidhosseinis\n\nبازکردن منو: /menu\nاعلان قیمت اختیاری و شخصی است.\nدستورات: /start /menu /price /weather /sources /news /support /subscribe /status /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
@@ -1157,4 +1213,4 @@ export default {
 };
 
 // Export narrow testable helpers; HTTP access still requires the verified webhook.
-export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard, prices, refreshPriceSnapshot};
+export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard, prices, refreshPriceSnapshot, historicalGrowthPercent, priceLine};
