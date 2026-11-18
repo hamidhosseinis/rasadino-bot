@@ -45,6 +45,7 @@ export function normalizeITunes(item) {
     id: "itunes:" + item.trackId, title, artist,
     album: safeText(item.collectionName) || null,
     year: releaseYear(item.releaseDate),
+    release_date: /^\d{4}-\d{2}-\d{2}/.test(item.releaseDate??"")?item.releaseDate.slice(0,10):null,
     genre: safeText(item.primaryGenreName,80) || null,
     source: "iTunes", source_id:String(item.trackId), play_url:playUrl
   };
@@ -66,6 +67,8 @@ export function normalizeAudius(item) {
   return {
     id:"audius:" + item.id, title, artist, album:null,
     year:releaseYear(item.releaseDate ?? item.release_date),
+    release_date:/^\d{4}-\d{2}-\d{2}/.test(item.releaseDate??item.release_date??"")?String(item.releaseDate??item.release_date).slice(0,10):null,
+    play_count:Number.isSafeInteger(item.play_count??item.playCount) && (item.play_count??item.playCount)>=0?(item.play_count??item.playCount):null,
     genre:safeText(item.genre,80) || null,
     source:"Audius", source_id:item.id, play_url:playUrl
   };
@@ -107,4 +110,22 @@ export async function searchAudius(query,{fetcher=globalThis.fetch}={}) {
   const data=await jsonRequest(url.href,{fetcher});
   if (!Array.isArray(data.data)) throw new Error("Invalid Audius search response");
   return data.data.slice(0,12).map(normalizeAudius).filter(Boolean);
+}
+
+// Audius official charts expose distinct week and allTime windows.
+// Never label these global Audius rankings as American/Persian national charts.
+export async function getAudiusChart({time="week",genre=null,limit=24,underground=false,fetcher=globalThis.fetch}={}) {
+  if (!["week","allTime"].includes(time) || !Number.isInteger(limit) || limit<1 || limit>40) throw new Error("Invalid chart request");
+  if (underground && time!=="week") throw new Error("Underground has no allTime chart");
+  const url=new URL("https://api.audius.co/v1/tracks/trending"+(underground?"/underground":""));
+  if (!underground) url.searchParams.set("time",time);
+  if (genre && !underground) url.searchParams.set("genre",genre);
+  url.searchParams.set("limit",String(limit));
+  url.searchParams.set("app_name","Rasadino");
+  const data=await jsonRequest(url.href,{fetcher});
+  if (!Array.isArray(data.data)) throw new Error("Invalid Audius chart response");
+  return data.data.slice(0,limit).map((item,index)=>{
+    const track=normalizeAudius(item);
+    return track ? {...track,chart_rank:index+1,chart_window:underground?"underground":time} : null;
+  }).filter(Boolean);
 }

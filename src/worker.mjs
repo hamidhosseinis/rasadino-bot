@@ -1,6 +1,7 @@
 
 import {musicMenuView} from "./music/menus.mjs";
 import {validateMusicQuery, checkMusicSearchRate, searchMusic, renderMusicSearch} from "./music/search.mjs";
+import {recommendMusic, renderRecommendations, validRecommendationSelection} from "./music/recommendations.mjs";
 
 const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
@@ -140,7 +141,7 @@ function welcome() {
     "💰 با دکمه «قیمت» نرخ بیت‌کوین، نفت برنت، تتر و طلای ۱۸ عیار و رشد تاریخی آن‌ها را ببین.",
     "🕙 گزارش خودکار بازار ساعت ۱۰ صبح و ۱۰ شب، فقط برای کاربران دارای اشتراک اعلان ارسال می‌شود.",
     "🌤 آب و هوای ۶ شهر منتخب و 📰 اخبار استان گلستان آماده‌اند.",
-    "🎧 رصد موزیک: جست‌وجوی آهنگ و انتخاب زبان و ژانر؛ پیشنهاد هوشمند در حال توسعه.",
+    "🎧 رصد موزیک: جست‌وجوی آهنگ و پیشنهاد خودکار ژانری؛ شخصی‌سازی در حال توسعه.",
     "📚 برای دیدن منابع قیمت و هواشناسی، دکمه «منابع» را بزن.",
     "💬 برای ارتباط با مدیر، دکمه «پشتیبان» را انتخاب کن.",
     "",
@@ -431,6 +432,37 @@ async function onCallbackQuery(query,env) {
     return renderMenu(env,chatId,
       "✅ منو بسته شد. هر زمان خواستی، دستور /menu یا /start را بفرست.",
       {inline_keyboard:[]},messageId);
+  }
+  if(/^music:preview:/.test(action)){
+    const selection=action.split(":");
+    const [language,genre,mode,countText]=selection.slice(2);
+    const count=Number(countText);
+    if(selection.length!==6 || String(count)!==countText ||
+      !validRecommendationSelection({language,genre,mode,count})){
+      const page=musicMenuView();
+      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+    }
+    await clearPendingMusic(env,chatId);
+    if(mode!=="today" && !(language==="fa" && ["week","classic","hidden"].includes(mode))){
+      try {
+        if(!await checkMusicSearchRate(env,chatId)){
+          return renderMenu(env,chatId,"⏳ لطفاً چند ثانیه بعد دوباره درخواست بده.",
+            musicMenuView("music:type:"+language+":"+genre+":"+mode).keyboard,messageId);
+        }
+      }catch{
+        return renderMenu(env,chatId,"⚠️ محدودکننده درخواست موقتاً در دسترس نیست؛ بعداً دوباره امتحان کن.",
+          musicMenuView("music:type:"+language+":"+genre+":"+mode).keyboard,messageId);
+      }
+    }
+    try{
+      const result=await recommendMusic(env,{language,genre,mode,count});
+      const page=renderRecommendations(result);
+      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+    }catch{
+      console.log("Music recommendation failed (details withheld)");
+      const page=renderRecommendations({status:"unavailable",language,genre,mode,count,tracks:[]});
+      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+    }
   }
   if(action.startsWith("music:")){
     const page=musicMenuView(action) ?? musicMenuView();
@@ -1292,7 +1324,7 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنمای رصدینو\n💰 قیمت‌ها: بیت‌کوین، نفت برنت، تتر و طلای ۱۸ عیار با رشد تاریخی\n🌤 آب‌وهوا: پیش‌بینی شش شهر گلستان\n📚 منابع: مراجع قیمت و هواشناسی\n📰 اخبار: تیترها و جزئیات ۴۸ ساعت اخیر گلستان\n🎧 رصد موزیک: جست‌وجوی آهنگ با /findmusic fa یا /findmusic us؛ پیشنهادها در حال توسعه\n💬 پشتیبانی: گفتگو با @hamidhosseinis\n\nبازکردن منو: /menu\nاعلان قیمت اختیاری و شخصی است.\nدستورات: /start /menu /price /weather /sources /news /music /findmusic /support /subscribe /status /stop",
+      "📖 راهنمای رصدینو\n💰 قیمت‌ها: بیت‌کوین، نفت برنت، تتر و طلای ۱۸ عیار با رشد تاریخی\n🌤 آب‌وهوا: پیش‌بینی شش شهر گلستان\n📚 منابع: مراجع قیمت و هواشناسی\n📰 اخبار: تیترها و جزئیات ۴۸ ساعت اخیر گلستان\n🎧 رصد موزیک: جست‌وجوی آهنگ با /findmusic fa یا /findmusic us؛ پیشنهادهای ژانری با دکمه‌های منو\n💬 پشتیبانی: گفتگو با @hamidhosseinis\n\nبازکردن منو: /menu\nاعلان قیمت اختیاری و شخصی است.\nدستورات: /start /menu /price /weather /sources /news /music /findmusic /support /subscribe /status /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
