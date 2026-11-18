@@ -1,0 +1,35 @@
+name: Temporary oil provider connectivity probe
+on:
+  push:
+    branches: ["fix/brent-oil-verified-sources-20261118"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check actual public oil feeds
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          const urls = [
+           'https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILBRENTEU&cosd_start=2026-11-01',
+           'https://raw.githubusercontent.com/datasets/oil-prices/main/data/brent-daily.csv',
+           'https://stooq.com/q/l/?s=cb.f&f=sd2t2ohlcv&h&e=csv',
+           'https://americasoilwatch.com/api/v1/brent',
+           'https://americasoilwatch.com/api/v1/brent-eia-daily'
+          ];
+          for(const url of urls){
+           try {
+            const r = await fetch(url,{signal:AbortSignal.timeout(9500),headers:{'User-Agent':'RasadinoDiagnostics/1.0','Accept':'text/csv,application/json,text/plain'}});
+            const body = await r.text();
+            console.log(JSON.stringify({url,status:r.status,type:r.headers.get('content-type'),bytes:body.length,first:body.slice(0,240),last:body.slice(-380)}));
+           } catch(e) {console.log(JSON.stringify({url,error:String(e)}));}
+          }
+          JS
