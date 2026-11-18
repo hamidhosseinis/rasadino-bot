@@ -1,12 +1,13 @@
-name: Rasadino Music stage 5 (local workerd smoke)
+name: Rasadino Music stage 6 (local workerd smoke)
 
 on:
   workflow_dispatch:
   push:
-    branches: ["feature/music-stage3-20261118"]
+    branches: ["feature/music-stage6-recommendations-20261118"]
     paths:
       - "src/music/providers.mjs"
       - "src/music/search.mjs"
+      - "src/music/recommendations.mjs"
       - "src/worker.mjs"
       - "scripts/music-workerd-*.mjs"
       - ".github/workflows/music-workerd-smoke.yml"
