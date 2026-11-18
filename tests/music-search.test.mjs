@@ -67,6 +67,13 @@ test("metadata adapters accept official URLs only and never propagate previews o
   assert.equal(aud.year,2016);
   assert.equal(aud.source,"Audius");
   assert.equal("trackCid" in aud,false);
+  const relative=normalizeAudius({...audiusTrack(),permalink:"/adele/hello-a1"});
+  assert.equal(relative.play_url,"https://audius.co/adele/hello-a1");
+  assert.equal(officialLink("//evil.example/trap","audius"),null);
+  assert.equal(officialLink("/artist/song?redirect=https://evil.example","audius"),null);
+  assert.equal(officialLink("/artist/song#fragment","audius"),null);
+  assert.equal(officialLink("/artist\\\\evil","audius"),null);
+  assert.equal(officialLink("/artist/song","itunes"),null);
 });
 
 test("provider requests contain only searched music metadata, fixed HTTPS host, no tokens",async()=>{
