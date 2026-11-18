@@ -38,6 +38,7 @@ const TYPES = Object.freeze([
 ]);
 
 const COUNTS = Object.freeze([1, 3, 5, 10]);
+const COUNT_LABELS = Object.freeze({1: "۱", 3: "۳", 5: "۵", 10: "۱۰"});
 
 const button = (label, callback) => ({text: label, callback_data: callback});
 const compact = (items, width = 2) => {
@@ -122,7 +123,7 @@ export function musicMenuView(action = "music:home") {
       "\n\nتعداد آهنگ‌ها را انتخاب کن.\nپیش‌فرض: ۵ آهنگ.",
       [
         ...compact(COUNTS.map(n => button(
-          n === 5 ? "۵ آهنگ ⭐ پیش‌فرض" : String(n).replace("1", "۱").replace("3", "۳").replace("10", "۱۰") + " آهنگ",
+          n === 5 ? "۵ آهنگ ⭐ پیش‌فرض" : COUNT_LABELS[n] + " آهنگ",
           "music:preview:" + lang + ":" + genre + ":" + kind + ":" + n
         ))),
         ...footer("music:genre:" + lang + ":" + genre)
