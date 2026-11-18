@@ -59,7 +59,8 @@ function view(text, rows) {
 }
 
 function genreLabel(lang, genre) {
-  return GENRES[lang]?.find(([id]) => id === genre)?.[1] ?? null;
+  if (!Object.hasOwn(GENRES, lang)) return null;
+  return GENRES[lang].find(([id]) => id === genre)?.[1] ?? null;
 }
 
 function typeLabel(kind) {
