@@ -89,6 +89,7 @@ export async function searchAudius(query,{fetcher=globalThis.fetch}={}) {
   const url=new URL("https://api.audius.co/v1/tracks/search");
   url.searchParams.set("query",query);
   url.searchParams.set("limit","12");
+  url.searchParams.set("app_name","Rasadino");
   const data=await jsonRequest(url.href,{fetcher});
   if (!Array.isArray(data.data)) throw new Error("Invalid Audius search response");
   return data.data.slice(0,12).map(normalizeAudius).filter(Boolean);
