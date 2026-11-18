@@ -1,0 +1,32 @@
+name: Rasadino music providers (read-only preflight)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feature/music-stage3-20261118"]
+    paths:
+      - "scripts/music-provider-preflight.mjs"
+      - ".github/workflows/music-provider-preflight.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  providers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Probe public metadata endpoints (no credentials or audio)
+        run: node scripts/music-provider-preflight.mjs
+      - name: Save sanitized connectivity results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-provider-connectivity
+          path: artifacts/music-provider-preflight.json
+          if-no-files-found: warn
+          retention-days: 7
