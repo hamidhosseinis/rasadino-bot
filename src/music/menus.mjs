@@ -70,7 +70,7 @@ function typeLabel(kind) {
 export function musicMenuView(action = "music:home") {
   if (action === "music:home") {
     return view(
-      "🎧 رصد موزیک\n\nزبان موسیقی را انتخاب کن.\n\n🔎 برای جست‌وجوی واقعی، زبان را انتخاب کن و دکمه جست‌وجو را بزن.\nبخش پیشنهادهای هوشمند هنوز در حال توسعه است.",
+      "🎧 رصد موزیک\n\nزبان موسیقی را انتخاب کن.\n\n🔎 برای جست‌وجوی واقعی زبان را انتخاب کن؛ پیشنهادهای ژانری هم فعال شده‌اند.\nℹ️ یادگیری سلیقه و ترندهای معتبر روزانه هنوز تکمیل نشده است.",
       [
         [button(LANGUAGES.fa, "music:lang:fa")],
         [button(LANGUAGES.us, "music:lang:us")],
@@ -87,7 +87,7 @@ export function musicMenuView(action = "music:home") {
     const lang = parts[2];
     if (!Object.hasOwn(GENRES, lang)) return null;
     const note = lang === "us"
-      ? "\nآثار انگلیسی‌زبان هنرمندان آمریکایی در اولویت خواهند بود."
+      ? "\nجست‌وجو از کاتالوگ آمریکایی و Audius انجام می‌شود؛ ملیت و زبان آهنگ‌ها قطعی تأیید نمی‌شوند."
       : "";
     return view(
       "🎧 رصد موزیک\n🌍 زبان: " + LANGUAGES[lang] + "\n\nژانر موردنظر را انتخاب کن." + note,
@@ -125,7 +125,7 @@ export function musicMenuView(action = "music:home") {
       "🎧 رصد موزیک\n🌍 زبان: " + LANGUAGES[lang] +
       "\n🎼 ژانر: " + name + "\n\nنوع پیشنهاد را انتخاب کن.",
       [
-        ...TYPES.map(([id, label]) => [button(label, "music:type:" + lang + ":" + genre + ":" + id)]),
+        ...TYPES.map(([id, label]) => [button(label + (id==="today"?" (بدون منبع روزانه)":lang==="fa"&&["week","classic","hidden"].includes(id)?" (نیازمند جدول فارسی)":""), "music:type:" + lang + ":" + genre + ":" + id)]),
         ...footer("music:lang:" + lang)
       ]
     );
