@@ -1,6 +1,7 @@
 
 import {musicMenuView} from "./music/menus.mjs";
 import {validateMusicQuery, checkMusicSearchRate, searchMusic, renderMusicSearch} from "./music/search.mjs";
+import {recommendMusic, renderRecommendations, validRecommendationSelection} from "./music/recommendations.mjs";
 
 const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
@@ -431,6 +432,37 @@ async function onCallbackQuery(query,env) {
     return renderMenu(env,chatId,
       "✅ منو بسته شد. هر زمان خواستی، دستور /menu یا /start را بفرست.",
       {inline_keyboard:[]},messageId);
+  }
+  if(/^music:preview:/.test(action)){
+    const selection=action.split(":");
+    const [language,genre,mode,countText]=selection.slice(2);
+    const count=Number(countText);
+    if(selection.length!==6 || String(count)!==countText ||
+      !validRecommendationSelection({language,genre,mode,count})){
+      const page=musicMenuView();
+      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+    }
+    await clearPendingMusic(env,chatId);
+    if(mode!=="today" && !(language==="fa" && ["week","classic","hidden"].includes(mode))){
+      try {
+        if(!await checkMusicSearchRate(env,chatId)){
+          return renderMenu(env,chatId,"⏳ لطفاً چند ثانیه بعد دوباره درخواست بده.",
+            musicMenuView("music:type:"+language+":"+genre+":"+mode).keyboard,messageId);
+        }
+      }catch{
+        return renderMenu(env,chatId,"⚠️ محدودکننده درخواست موقتاً در دسترس نیست؛ بعداً دوباره امتحان کن.",
+          musicMenuView("music:type:"+language+":"+genre+":"+mode).keyboard,messageId);
+      }
+    }
+    try{
+      const result=await recommendMusic(env,{language,genre,mode,count});
+      const page=renderRecommendations(result);
+      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+    }catch{
+      console.log("Music recommendation failed (details withheld)");
+      const page=renderRecommendations({status:"unavailable",language,genre,mode,count,tracks:[]});
+      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+    }
   }
   if(action.startsWith("music:")){
     const page=musicMenuView(action) ?? musicMenuView();
