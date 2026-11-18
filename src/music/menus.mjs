@@ -141,7 +141,7 @@ export function musicMenuView(action = "music:home") {
     return view(
       "🎧 خلاصه انتخاب رصد موزیک\n\n🌍 زبان: " + LANGUAGES[lang] +
       "\n🎼 ژانر: " + name + "\n📌 نوع: " + recommended +
-      "\n🎵 تعداد: " + count + " آهنگ" +
+      "\n🎵 تعداد: " + COUNT_LABELS[count] + " آهنگ" +
       "\n\n🧪 منو آماده آزمایش است؛ اتصال به منابع موسیقی و ارسال پیشنهاد در مراحل بعد انجام می‌شود.\nهیچ آهنگی ارسال نشده و هیچ اشتراک روزانه‌ای فعال نشده است.",
       [
         [button("🔁 تغییر تعداد", "music:type:" + lang + ":" + genre + ":" + kind)],
