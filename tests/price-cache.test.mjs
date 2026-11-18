@@ -119,6 +119,7 @@ test("a provider outage preserves recent quotes per asset",async t=>{
   const initial=await refreshPriceSnapshot(e);
   assert.ok(initial.gold.value>0);
   api.setTgjuFailure(true);
+  api.setOilFailure(true);
   const next=await refreshPriceSnapshot(e);
   assert.equal(next.btc.value,100000);
   assert.equal(next.usdt.value,initial.usdt.value);
