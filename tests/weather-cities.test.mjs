@@ -56,6 +56,13 @@ function stubFetch(t) {
       price.push("coingecko");
       return {ok:true,status:200,json:async()=>({bitcoin:{usd:68000}})};
     }
+    if(u.includes("stooq.com/q/l/")){
+      price.push("stooq");
+      return {ok:true,status:200,text:async()=>(
+        "Symbol,Date,Time,Open,High,Low,Close,Volume\n"+
+        "CB.F,"+new Date().toISOString().slice(0,10).replace(/-/g,"")+
+        ",10:00:00,90.1,91.2,89.5,90.5,10000\n")};
+    }
     if(u.includes("tgju.org/profile/")){
       price.push("tgju");
       const html="<html><body>نرخ فعلی ۱۲٬۳۴۵٬۶۷۸ قیمت ریالی ۱٬۲۳۴٬۵۶۷"+(" نمونه".repeat(100))+"</body></html>";
@@ -143,6 +150,8 @@ test("Sources button explains all current price and weather sources, without fet
   ])assert.ok(msg.text.includes(link),link);
   assert.match(msg.text,/جایگزین/);
   assert.match(msg.text,/۶ شهر/);
+  assert.match(msg.text,/نفت خام برنت/);
+  assert.doesNotMatch(msg.text,/price_dollar_rl|💵 دلار آزاد/);
   assert.equal(weather.length,0);
   assert.equal(price.length,0);
   assert.equal((await update(e,"/sources",1102)).status,200);
@@ -157,8 +166,12 @@ test("Manual and scheduled price reports omit provider names and URLs",async t=>
   let message=lastSent(telegram).text;
   assert.match(message,/گزارش قیمت بازار/);
   assert.match(message,/بیت‌کوین/);
+  assert.match(message,/نفت خام برنت/);
+  assert.doesNotMatch(message,/دلار آزاد/);
   assert.doesNotMatch(message,/CoinGecko|Coinbase|TGJU|tgju\.org|منابع:/);
   assert.equal(price.length,4);
+  assert.equal(price.filter(x=>x==="stooq").length,1);
+  assert.equal(price.filter(x=>x==="tgju").length,2);
   assert.equal((await update(e,"/start",1201)).status,200);
   assert.equal((await update(e,"/subscribe",1202)).status,200);
   const scheduled=[];

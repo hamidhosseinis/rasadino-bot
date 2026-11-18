@@ -2,7 +2,10 @@
 const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
 const TETHER_URL = "https://www.tgju.org/profile/crypto-tether";
-const DOLLAR_URL = "https://www.tgju.org/profile/price_dollar_rl";
+// Brent front-month futures (USD per barrel); free public sources, no API key.
+const OIL_STOOQ_URL = "https://stooq.com/q/l/?s=cb.f&f=sd2t2ohlcv&h&e=csv";
+const OIL_FALLBACK_URL = "https://americasoilwatch.com/api/v1/brent";
+const OIL_MARKET_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Historical estimates, not observed retail prices on 1 Farvardin 1357.
 // Approx. USD = 7 tomans in early 1357; gold fixing = $177.25/oz on 21 Mar 1978.
@@ -10,6 +13,9 @@ const DOLLAR_URL = "https://www.tgju.org/profile/price_dollar_rl";
 const HISTORICAL_USD_TOMAN = 7;
 const HISTORICAL_GOLD18_TOMAN = 177.25 * HISTORICAL_USD_TOMAN * 0.75 / 31.1034768;
 const HISTORICAL_BTC_USD = 1 / 1309.03;
+// World Bank Pink Sheet, March 1978 crude oil reference ($/barrel), Saudi Arabian Light.
+// Brent futures did not exist in 1357; this is a cross-benchmark historical comparison.
+const HISTORICAL_OIL_USD = 12.66;
 
 // The existing persistent KV stores a snapshot updated every ten minutes.
 const PRICE_CACHE_KEY = "prices:latest:v1";
@@ -40,7 +46,7 @@ const BACK_CLOSE = [
 ];
 function priceMenuKeyboard() {
   return {inline_keyboard:[
-    [{text:"₿ بیت‌کوین",callback_data:"price:btc"}, {text:"💵 دلار آزاد",callback_data:"price:usd"}],
+    [{text:"₿ بیت‌کوین",callback_data:"price:btc"}, {text:"🛢 نفت برنت",callback_data:"price:oil"}],
     [{text:"💲 تتر",callback_data:"price:usdt"}, {text:"🥇 طلای ۱۸ عیار",callback_data:"price:gold"}],
     [{text:"📊 همه قیمت‌ها",callback_data:"price:all"}],
     [{text:"🔄 تازه‌سازی همه قیمت‌ها",callback_data:"price:refresh"}],
@@ -92,7 +98,7 @@ async function removeLegacyKeyboardOnce(env,chatId) {
 function priceViewText(pr,asset="all") {
   const names = {
     btc:priceLine(pr.btc,"btc"),
-    usd:priceLine(pr.usd,"usd"),
+    oil:priceLine(pr.oil,"oil"),
     usdt:priceLine(pr.usdt,"usdt"),
     gold:priceLine(pr.gold,"gold")
   };
@@ -124,7 +130,7 @@ function welcome() {
     "👋 به رصدینو | Rasadino خوش آمدی!",
     "",
     "📡 رصدینو دستیار هوشمند رصد اطلاعات و اعلان‌هاست.",
-    "💰 با دکمه «قیمت» نرخ بیت‌کوین، دلار آزاد، تتر و طلای ۱۸ عیار و رشد تاریخی آن‌ها را ببین.",
+    "💰 با دکمه «قیمت» نرخ بیت‌کوین، نفت برنت، تتر و طلای ۱۸ عیار و رشد تاریخی آن‌ها را ببین.",
     "🕙 گزارش خودکار بازار ساعت ۱۰ صبح و ۱۰ شب، فقط برای کاربران دارای اشتراک اعلان ارسال می‌شود.",
     "🌤 آب و هوای ۶ شهر منتخب و 📰 اخبار استان گلستان آماده‌اند.",
     "📚 برای دیدن منابع قیمت و هواشناسی، دکمه «منابع» را بزن.",
@@ -392,8 +398,8 @@ async function onCallbackQuery(query,env) {
       {inline_keyboard:[]},messageId);
   }
   if(action==="price:menu")return showPriceMenu(env,chatId,messageId);
-  if(["price:btc","price:usd","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
-    const asset=action==="price:refresh"?"all":action.slice(6);
+  if(["price:btc","price:usd","price:oil","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
+    const asset=action==="price:refresh"?"all":(action==="price:usd"?"oil":action.slice(6));
     return renderMenu(env,chatId,priceViewText(await prices(env),asset),priceResultKeyboard(),messageId);
   }
   if(action==="sources:show"){
@@ -887,14 +893,14 @@ async function tgjuRial(url, label) {
   const html = await response.text();
   if (html.length < 250) throw new Error("TGJU HTML empty");
   const text = toText(html);
-  const pattern = label === "gold" || label === "dollar"
+  const pattern = label === "gold"
     ? /نرخ\s*فعلی\s*[:：]*\s*([0-9۰-۹٠-٩٬,.]+)/u
     : /قیمت\s*ریالی\s*[:：]*\s*([0-9۰-۹٠-٩٬,.]+)/u;
   const m = text.match(pattern);
   if (!m) throw new Error("TGJU price not found");
   const rial = Number(latinNumber(m[1]));
   if (!Number.isFinite(rial) || (label === "gold" && (rial < 1000000 || rial > 10000000000))
-      || ((label === "tether" || label === "dollar") && (rial < 10000 || rial > 100000000))) {
+      || (label === "tether" && (rial < 10000 || rial > 100000000))) {
     throw new Error("TGJU invalid range");
   }
   return {value: rial / 10, source: "TGJU", url};
@@ -916,18 +922,74 @@ async function btcPrice() {
     return {value, source: "Coinbase"};
   }
 }
+// Quote timestamps are market dates, distinct from the 10-minute cache-refresh time.
+function oilMarketDate(value) {
+  const raw=String(value??"").trim();
+  const match=raw.match(/^(\d{4})[-/]?(\d{2})[-/]?(\d{2})/);
+  if (!match) return null;
+  const day=match[1]+"-"+match[2]+"-"+match[3];
+  const stamp=Date.parse(day+"T00:00:00Z");
+  if (!Number.isFinite(stamp) || new Date(stamp).toISOString().slice(0,10)!==day) return null;
+  return day;
+}
+function validOilPrice(value,marketDate) {
+  const v=Number(value);
+  const stamp=Date.parse((marketDate||"")+"T00:00:00Z");
+  if (!Number.isFinite(v) || v<5 || v>400 ||
+      !Number.isFinite(stamp) || stamp>Date.now()+86400000 ||
+      Date.now()-stamp>OIL_MARKET_MAX_AGE_MS) {
+    throw Error("Invalid or outdated Brent market quote");
+  }
+  return v;
+}
+async function stooqBrentPrice() {
+  const r=await fetch(OIL_STOOQ_URL,{
+    headers:{"Accept":"text/csv","User-Agent":"Mozilla/5.0 (compatible; RasadinoBot/1.0)"},
+    signal:AbortSignal.timeout(12000)
+  });
+  if(!r.ok)throw Error("Stooq oil HTTP "+r.status);
+  const lines=(await r.text()).trim().split(/\r?\n/);
+  if(lines.length<2)throw Error("Stooq oil CSV unavailable");
+  const headers=lines[0].split(",").map(x=>x.trim().toLowerCase());
+  const data=lines[1].split(",").map(x=>x.trim());
+  const get=name=>data[headers.indexOf(name)];
+  if(!headers.includes("close") || !headers.includes("date") ||
+     !/^cb[.]f$/i.test(get("symbol")||""))throw Error("Unexpected Stooq Brent data");
+  const marketDate=oilMarketDate(get("date"));
+  const value=validOilPrice(get("close"),marketDate);
+  return {value,source:"Stooq CB.F",marketDate};
+}
+async function backupBrentPrice() {
+  const r=await fetch(OIL_FALLBACK_URL,{headers:{"Accept":"application/json"},
+    signal:AbortSignal.timeout(12000)});
+  if(!r.ok)throw Error("AmericasOilWatch HTTP "+r.status);
+  const j=await r.json();
+  const d=j?.data??j?.quote??j?.brent??j?.latest??j;
+  const rawValue=d?.price_usd_per_bbl??d?.price_usd??d?.price??
+    d?.current_price??d?.value??j?.price;
+  const rawDate=d?.market_date??d?.as_of??d?.date??d?.updated_at??
+    d?.timestamp??j?.market_date??j?.as_of??j?.date??j?.updated_at;
+  const marketDate=oilMarketDate(rawDate);
+  const value=validOilPrice(rawValue,marketDate);
+  return {value,source:"AmericasOilWatch",marketDate};
+}
+async function oilPrice() {
+  try{return await stooqBrentPrice();}
+  catch(e){console.log("Oil primary provider unavailable: "+String(e.message));
+    return backupBrentPrice();}
+}
 async function quote(task) {
   try { return await task(); }
   catch (e) { console.log("Quote unavailable: " + String(e.message)); return {value: null, source: "unavailable"}; }
 }
 async function fetchPriceQuotes() {
-  const [btc, usdt, gold, usd] = await Promise.all([
+  const [btc, usdt, gold, oil] = await Promise.all([
     quote(btcPrice),
     quote(() => tgjuRial(TETHER_URL, "tether")),
     quote(() => tgjuRial(GOLD_URL, "gold")),
-    quote(() => tgjuRial(DOLLAR_URL, "dollar"))
+    quote(oilPrice)
   ]);
-  return {btc, usdt, gold, usd};
+  return {btc, usdt, gold, oil};
 }
 function validPriceQuote(item) {
   return item && typeof item.value === "number" && Number.isFinite(item.value) && item.value > 0;
@@ -944,8 +1006,10 @@ async function readPriceCache(env) {
 }
 function visibleQuote(item, now) {
   const updated = Date.parse(item?.updatedAt || "");
+  const marketStamp=item?.marketDate?Date.parse(item.marketDate+"T00:00:00Z"):null;
   if (!validPriceQuote(item) || !Number.isFinite(updated) ||
-      updated > now + 60000 || now - updated > PRICE_QUOTE_MAX_AGE_MS) {
+      updated > now + 60000 || now - updated > PRICE_QUOTE_MAX_AGE_MS ||
+      (item?.marketDate && (!Number.isFinite(marketStamp) || now-marketStamp>OIL_MARKET_MAX_AGE_MS))) {
     return {value:null, source:item?.source || "unavailable",
       updatedAt:Number.isFinite(updated) ? item.updatedAt : null, stale:true};
   }
@@ -953,11 +1017,12 @@ function visibleQuote(item, now) {
 }
 function visibleSnapshot(item) {
   const now = Date.now();
-  return {...item,
+  // Explicit allowlist: older KV snapshots may still contain a retired USD quote.
+  return {at:item.at,
     btc:visibleQuote(item.btc,now),
     usdt:visibleQuote(item.usdt,now),
     gold:visibleQuote(item.gold,now),
-    usd:visibleQuote(item.usd,now)};
+    oil:visibleQuote(item.oil,now)};
 }
 // Refresh providers independently, preserving each last successful quote.
 async function refreshPriceSnapshot(env) {
@@ -967,7 +1032,7 @@ async function refreshPriceSnapshot(env) {
   const fresh = await fetchPriceQuotes();
   const at = new Date().toISOString();
   const merged = {};
-  for (const asset of ["btc","usdt","gold","usd"]) {
+  for (const asset of ["btc","usdt","gold","oil"]) {
     merged[asset] = validPriceQuote(fresh[asset])
       ? {...fresh[asset], updatedAt:at}
       : (validPriceQuote(previous?.[asset]) ? previous[asset]
@@ -982,7 +1047,8 @@ async function prices(env) {
   let cached = null;
   try { cached = await readPriceCache(env); }
   catch (e) { console.log("Price cache read failed: " + String(e.message)); }
-  if (cached && Date.now() - Date.parse(cached.at) < PRICE_READ_MAX_AGE_MS)
+  if (cached && Object.hasOwn(cached,"oil") &&
+      Date.now() - Date.parse(cached.at) < PRICE_READ_MAX_AGE_MS)
     return visibleSnapshot(cached);
   try { return await refreshPriceSnapshot(env); }
   catch (e) {
@@ -1010,15 +1076,19 @@ function priceLine(item, asset) {
   const data = {
     btc:{title:"₿ بیت‌کوین",currency:"USD",baseline:HISTORICAL_BTC_USD,
       note:"رشد از اولین نرخ دلاری ثبت‌شده (۵ اکتبر ۲۰۰۹)"},
-    usd:{title:"💵 دلار آزاد",currency:"IRR",baseline:HISTORICAL_USD_TOMAN,
-      note:"رشد از حدود ۷ تومان در ابتدای ۱۳۵۷"},
+    oil:{title:"🛢 نفت خام برنت (هر بشکه)",currency:"USD",baseline:HISTORICAL_OIL_USD,
+      note:"قیاس با نفت خام مرجع مارس ۱۹۷۸ / فروردین ۱۳۵۷ (۱۲٫۶۶ دلار)"},
     usdt:{title:"💲 تتر (USDT)",currency:"IRR",baseline:HISTORICAL_USD_TOMAN,
       note:"قیاس با دلار ابتدای ۱۳۵۷ (تتر آن زمان وجود نداشت)"},
     gold:{title:"🥇 هر گرم طلای ۱۸ عیار",currency:"IRR",baseline:HISTORICAL_GOLD18_TOMAN,
       note:"رشد از برآورد حدود ۳۰ تومان در ابتدای ۱۳۵۷"}
   }[asset];
   if (!data) return "قیمت نامشخص";
-  return data.title+": "+money(item,data.currency)+"\n  📈 "+data.note+": "+growthText(item,data.baseline);
+  const dateLine=asset==="oil" && item?.marketDate ?
+    "\n  📅 آخرین روز معامله: "+new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
+      timeZone:"UTC",year:"numeric",month:"2-digit",day:"2-digit"
+    }).format(new Date(item.marketDate+"T00:00:00Z")) : "";
+  return data.title+": "+money(item,data.currency)+dateLine+"\n  📈 "+data.note+": "+growthText(item,data.baseline);
 }
 function report(pr) {
   const date = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
@@ -1030,14 +1100,15 @@ function report(pr) {
     "",
     priceLine(pr.btc,"btc"),
     "",
-    priceLine(pr.usd,"usd"),
+    priceLine(pr.oil,"oil"),
     "",
     priceLine(pr.usdt,"usdt"),
     "",
     priceLine(pr.gold,"gold"),
     "",
-    "ℹ️ درصدها اسمی و مبنای ابتدای ۱۳۵۷ تقریبی است؛ روش و منابع در 📚 منابع.",
-    "قیمت‌ها هر ۱۰ دقیقه بررسی می‌شوند؛ نرخ قدیمی‌تر از ۲۰ دقیقه نمایش داده نمی‌شود."
+    "ℹ️ مقایسه نفت با شاخص تاریخی تقریبی است؛ روش و منابع در 📚 منابع.",
+    "قیمت‌ها هر ۱۰ دقیقه بررسی می‌شوند؛ نرخ ثبت‌شده بیش از ۲۰ دقیقه قبل بازنمایی نمی‌شود.",
+    "نفت: آخرین نرخ منتشرشده بازار (ممکن است در تعطیلی بورس ثابت بماند)."
   ].join("\n");
 }
 function sourcesMessage() {
@@ -1054,8 +1125,10 @@ function sourcesMessage() {
     "در صورت اختلال CoinGecko: Coinbase — منبع جایگزین",
     "https://www.coinbase.com/price/bitcoin",
     "",
-    "💵 دلار آزاد (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
-    DOLLAR_URL,
+    "🛢 نفت خام برنت (دلار آمریکا برای هر بشکه): Stooq (قرارداد آتی نزدیک‌ترین سررسید) — منبع اصلی",
+    "https://stooq.com/q/?s=cb.f",
+    "در صورت اختلال: AmericasOilWatch — منبع جایگزین (به‌روزرسانی بر اساس داده‌های بازار)",
+    OIL_FALLBACK_URL,
     "",
     "💲 تتر (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
     TETHER_URL,
@@ -1066,7 +1139,10 @@ function sourcesMessage() {
     "📈 روش درصد رشد: (قیمت فعلی ÷ قیمت مبنا − ۱) × ۱۰۰",
     "رشدها اسمی‌اند و تورم‌زدایی نشده‌اند.",
     "مبنای ابتدای ۱۳۵۷ (۱ فروردین = ۲۱ مارس ۱۹۷۸):",
-    "• دلار: حدود ۷ تومان؛ نرخ دقیق دادوستد آن روز در دست نیست و مبنا برآوردی است.",
+    "• نفت: ۱۲٫۶۶ دلار برای هر بشکه؛ میانگین مارس ۱۹۷۸ بانک جهانی (نفت سبک عربستان، شاخص تاریخیِ قبل از پیدایش برنت).",
+    "https://thedocs.worldbank.org/en/doc/386771467756369668-0050022016/render/CMOHistoricalDataMonthly.pdf",
+    "این نرخ قیمت دقیق ۱ فروردین نیست؛ مقایسه آن با قرارداد آتی برنت امروز صرفاً تقریبی و بین دو شاخص متفاوت است.",
+    "• دلار حدود ۷ تومان صرفاً مبنای محاسبه تاریخی طلا و مقایسه تتر است؛ قیمت روز دلار در رصدینو نمایش داده نمی‌شود.",
     "https://factnameh.com/fa/fact-checks/2018-02-16-dollar-iran-currency",
     "• طلای ۱۸ عیار: حدود ۳۰ تومان برای هر گرم؛ برآورد از قیمت ۱۷۷٫۲۵ دلار برای اونس جهانی در ۲۱ مارس ۱۹۷۸، دلار حدود ۷ تومان و عیار ۷۵٪.",
     "https://sdbullion.com/gold-prices-1978",
@@ -1128,7 +1204,7 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنمای رصدینو\n💰 قیمت‌ها: بیت‌کوین، دلار آزاد، تتر و طلای ۱۸ عیار با رشد تاریخی\n🌤 آب‌وهوا: پیش‌بینی شش شهر گلستان\n📚 منابع: مراجع قیمت و هواشناسی\n📰 اخبار: تیترها و جزئیات ۴۸ ساعت اخیر گلستان\n💬 پشتیبانی: گفتگو با @hamidhosseinis\n\nبازکردن منو: /menu\nاعلان قیمت اختیاری و شخصی است.\nدستورات: /start /menu /price /weather /sources /news /support /subscribe /status /stop",
+      "📖 راهنمای رصدینو\n💰 قیمت‌ها: بیت‌کوین، نفت برنت، تتر و طلای ۱۸ عیار با رشد تاریخی\n🌤 آب‌وهوا: پیش‌بینی شش شهر گلستان\n📚 منابع: مراجع قیمت و هواشناسی\n📰 اخبار: تیترها و جزئیات ۴۸ ساعت اخیر گلستان\n💬 پشتیبانی: گفتگو با @hamidhosseinis\n\nبازکردن منو: /menu\nاعلان قیمت اختیاری و شخصی است.\nدستورات: /start /menu /price /weather /sources /news /support /subscribe /status /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
