@@ -29,7 +29,11 @@ jobs:
            try {
             const r = await fetch(url,{signal:AbortSignal.timeout(9500),headers:{'User-Agent':'RasadinoDiagnostics/1.0','Accept':'text/csv,application/json,text/plain'}});
             const body = await r.text();
-            console.log(JSON.stringify({url,status:r.status,type:r.headers.get('content-type'),bytes:body.length,first:body.slice(0,240),last:body.slice(-380)}));
+            let fields=null;
+            if(r.headers.get('content-type')?.includes('json')){
+             try {const p=JSON.parse(body); fields=Object.fromEntries(Object.entries(p).filter(([k,v])=>!Array.isArray(v)&& (typeof v==='number'||typeof v==='string'||typeof v==='boolean')).slice(0,28));}catch{}
+            }
+            console.log(JSON.stringify({url,status:r.status,type:r.headers.get('content-type'),bytes:body.length,first:body.slice(0,120),last:body.slice(-260),fields}));
            } catch(e) {console.log(JSON.stringify({url,error:String(e)}));}
           }
           JS
