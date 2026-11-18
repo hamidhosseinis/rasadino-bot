@@ -1,6 +1,6 @@
-# 🎧 Rasadino Music — Stage 5: Metadata Search (feature branch only)
+# 🎧 Rasadino Music — Stage 5: Metadata Search (released)
 
-**Status:** code + simulated regression tests complete; **not deployed to the public bot**.
+**Production deployment:** 2026-11-18, Worker `hamid-price-report-bot`, Cloudflare version `26337585-268d-423f-9b74-98b8eca07264` (100% traffic). GitHub PR #13 merged into `main`. **Live original Worker HTTP smoke: 5/5 passed** (news status, health + webhook, prices, invalid webhook rejection, unknown HTTP music path); separate regression suite: 65/65 passed and local workerd smoke passed. **Real Telegram user navigation / sending a music query has not yet been independently verified**. No music notifications, MP3, ranked charts or personalized recommendations have been enabled.
 
 ## New search UX
 
@@ -49,7 +49,7 @@ GitHub Actions runs `node --check src/worker.mjs` and `node --test tests/*.test.
 
 `music-search-preflight.yml` performs **live external GET metadata requests from a GitHub runner only**, without API keys or user data. A verified HTTP response from GitHub does not prove a future deployed Cloudflare Worker will access the provider.
 
-**Never deploy this branch directly to `hamid-price-report-bot`, bind it to production KV, or run with production Telegram credentials in staging.** Release requires separate staging, approval, preservation of all current Crons and rollback checks, and live Telegram verification.
+**Historical release gate:** Development originally required independent staging. The owner subsequently explicitly authorized using the original Rasadino bot for live testing. After preserving a persistent-only private KV snapshot, checking all 5 secret/KV bindings and 3 Crons, and merging PR #13, the existing Worker received a separate uploaded version and an intentional production deployment. The prior Worker version `11e9613e-9c0a-4651-8b86-4aeb1b928db1` is retained as a rollback target. The remaining release gate is a real user-driven Telegram music-menu / search check; the 5/5 HTTP smoke is not a substitute.
 
 ## Stage 6 candidate work
 
@@ -65,3 +65,13 @@ Build a source-backed recommendation engine for chosen language/genre/type/count
 - GitHub Actions regression suite: **65 passed / 0 failed**, including URL-injection and relative Audius permalink tests.
 - Tests covered mock Telegram and local workerd. There is **no independently deployed staging Worker**, no actual Telegram test bot integration, no validated outbound iTunes/Audius access from Cloudflare production runtime, and no live bot release.
 - The current Cloudflare production Worker, existing Crons and main branch are intentionally unchanged.
+
+## Production release verification
+
+- GitHub main merge SHA: `a8c5c71fcfe6a9e0858f545fb6ef80108d2a2411` (PR #13).
+- Cloudflare deployment ID: `84586113-a939-44c8-9487-b24781143053`, Worker version `26337585-268d-423f-9b74-98b8eca07264` (100%).
+- Previous Worker version `11e9613e-9c0a-4651-8b86-4aeb1b928db1` retained for code rollback.
+- Original Cloudflare KV namespace retained; 3 existing Cron expressions unchanged. Secrets remained inherited by name and type; no values retrieved.
+- Fresh in-account, persistent-only KV backup in separate unbound namespace `rasadino-music-prod-predeploy-20261118`. 13 persistent keys verified; expiring markers were intentionally excluded.
+- Original public bot HTTP smoke: GitHub Actions `44304086516`; **5/5 passed**; **no Telegram messages were sent by this suite**.
+- Remaining: ask a genuine Telegram user to run `/music`, select Persian / US English, and search a song from the actual account. Provider outbound requests from the production Worker have **not yet been independently tested**.
