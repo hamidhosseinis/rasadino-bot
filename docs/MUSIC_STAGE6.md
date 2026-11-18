@@ -1,6 +1,6 @@
 # Rasadino Music — Stage 06: Source-backed Recommendations
 
-**Status:** feature branch; production deployment requires confirmed CI, backup and preservation of original bot.
+**Status:** Merged via PR #14 and deployed on the original @Rasadinobot Cloudflare Worker on 2026-11-18. Version: `44d280e2-f7d7-440c-9144-ae988c35c738` at 100% traffic. Existing secret/KV bindings and three Crons preserved; previous version `26337585-268d-423f-9b74-98b8eca07264` is available for code rollback. **Actual Telegram taps for the new recommendation modes have not yet been independently confirmed by a user**.
 
 ## Navigation
 
@@ -72,3 +72,13 @@ US citizenship or verified language.
    confirmation from the owner.
 8. If a new production issue emerges, deploy recorded prior Worker version;
    KV restore is a separate reviewed, explicit procedure.
+
+## Deployment evidence (2026-11-18)
+
+- PR: #14, merged into main at SHA `9d3f1649b14866d9dfea1e7da1101781a5188842`.
+- Cloudflare Worker: `hamid-price-report-bot`, active deployment `e70a0db3-5299-4278-a8e6-834f49e7ff06`, active version `44d280e2-f7d7-440c-9144-ae988c35c738` (100%).
+- Old worker version retained: `26337585-268d-423f-9b74-98b8eca07264`.
+- Dedicated private KV snapshot: `rasadino-stage6-predeploy-20261118` — 13 persistent keys copied and compared, 62 expiring keys excluded. In-account persistent-only, not disaster-recovery backup.
+- Before publication, 75/75 automated tests passed; independent local workerd smoke passed; metadata-only GitHub runner provider verification: 6/6 valid nonempty results, including 36-item chart endpoint requests.
+- After publication, the active version, all five secret/KV binding names, original STATE namespace, compatibility date and 3 Crons were verified through Cloudflare API.
+- Note that even positive Cloudflare health/HTTP checks do not prove a user has received recommendations in Telegram. **Ask owner to select a genre/mode/count and verify song links**.
