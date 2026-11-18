@@ -29,6 +29,7 @@ function interceptFetch(t) {
   const calls=[];
   let failTgju=false;
   let failOil=false;
+  let failStooqOnly=false;
   globalThis.fetch=async (url,opts={})=>{
     const target=String(url);
     calls.push(target);
@@ -39,7 +40,7 @@ function interceptFetch(t) {
       return {ok:true,status:200,json:async()=>({bitcoin:{usd:100000}})};
     }
     if(target.includes("stooq.com/q/l/")) {
-      if(failOil) throw Error("Simulated Stooq oil outage");
+      if(failOil||failStooqOnly) throw Error("Simulated Stooq oil outage");
       return {ok:true,status:200,text:async()=>(
         "Symbol,Date,Time,Open,High,Low,Close,Volume\n"+
         "CB.F,"+new Date().toISOString().slice(0,10).replace(/-/g,"")+
@@ -57,7 +58,7 @@ function interceptFetch(t) {
     throw Error("Unexpected request: "+target);
   };
   t.after(()=>{globalThis.fetch=original});
-  return {calls,setTgjuFailure(value){failTgju=value;},setOilFailure(value){failOil=value;}};
+  return {calls,setTgjuFailure(value){failTgju=value;},setOilFailure(value){failOil=value;},setStooqOnlyFailure(value){failStooqOnly=value;}};
 }
 
 async function trigger(e,cron,scheduledTime=Date.now()) {
@@ -165,4 +166,35 @@ test("only the old 10:00/22:00 Iran triggers send scheduled prices",async t=>{
   assert.equal(calls.filter(x=>x.includes("/sendMessage")).length,1,"same slot deduplicated");
   await trigger(e,"30 6,18 * * *",Date.UTC(2026,10,10,18,30));
   assert.equal(calls.filter(x=>x.includes("/sendMessage")).length,2);
+});
+
+test("fallback API supplies dated Brent price when Stooq fails",async t=>{
+  const api=interceptFetch(t);
+  const e=makeEnv();
+  api.setStooqOnlyFailure(true);
+  const q=await refreshPriceSnapshot(e);
+  assert.equal(q.oil.value,91.5);
+  assert.equal(q.oil.source,"AmericasOilWatch");
+  assert.equal(q.oil.marketDate,new Date().toISOString().slice(0,10));
+  assert.equal(api.calls.filter(x=>x.includes("stooq.com")).length,1);
+  assert.equal(api.calls.filter(x=>x.includes("americasoilwatch.com")).length,1);
+});
+
+test("a stale oil market date is not misrepresented as today's price",async t=>{
+  const {calls}=interceptFetch(t);
+  const e=makeEnv();
+  const current=new Date().toISOString();
+  const oldDay=new Date(Date.now()-9*86400000).toISOString().slice(0,10);
+  e.STATE.data.set("prices:latest:v1",JSON.stringify({at:current,
+    btc:{value:100000,source:"CoinGecko",updatedAt:current},
+    gold:{value:5000000,source:"TGJU",updatedAt:current},
+    usdt:{value:100000,source:"TGJU",updatedAt:current},
+    usd:{value:100000,source:"TGJU",updatedAt:current},
+    oil:{value:80,source:"Stooq CB.F",updatedAt:current,marketDate:oldDay}
+  }));
+  const snapshot=await prices(e);
+  assert.equal(snapshot.oil.value,null);
+  assert.equal(snapshot.oil.stale,true);
+  assert.equal(snapshot.usd,undefined);
+  assert.equal(calls.length,0);
 });
