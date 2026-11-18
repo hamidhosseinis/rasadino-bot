@@ -28,6 +28,17 @@ try {
   const keys=await kv.list({prefix:"music:search:v1:"});
   assert.equal(keys.keys.length,1);
   assert.ok(keys.keys[0].expiration>Date.now()/1000);
+  const recommended=await (await music.dispatchFetch("http://localhost:8787/recommend?mode=week")).json();
+  assert.equal(recommended.status,"ok");
+  assert.equal(recommended.count,1);
+  assert.equal(recommended.rank,1);
+  assert.match(recommended.sourceNote,/Audius/);
+  assert.equal(new URL(recommended.links[0]).hostname,"audius.co");
+  const secondRecommendation=await (await music.dispatchFetch("http://localhost:8787/recommend?mode=week")).json();
+  assert.equal(secondRecommendation.fromCache,true);
+  const cached=await kv.list({prefix:"music:recommend:v1:"});
+  assert.equal(cached.keys.length,1);
+  console.log("PASS: local workerd runs source-backed weekly Audius recommendations with KV cache.");
   console.log("PASS: local workerd executes iTunes normalization, SHA-256 cache and KV TTL.");
 } finally {
   await music.dispose();
