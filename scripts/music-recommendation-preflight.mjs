@@ -8,9 +8,9 @@ const kv=new Map(),STATE={
   async put(k,v){kv.set(k,v)}
 };
 const checks=[
-  ["audius_week",async()=>getAudiusChart({time:"week",genre:"Pop",limit:6})],
-  ["audius_all_time",async()=>getAudiusChart({time:"allTime",limit:6})],
-  ["audius_underground",async()=>getAudiusChart({underground:true,time:"week",limit:6})],
+  ["audius_week",async()=>getAudiusChart({time:"week",genre:"Pop",limit:36})],
+  ["audius_all_time",async()=>getAudiusChart({time:"allTime",limit:36})],
+  ["audius_underground",async()=>getAudiusChart({underground:true,time:"week",limit:36})],
   ["persian_smart",async()=>{const r=await recommendMusic({STATE},{language:"fa",genre:"pop",mode:"smart",count:5});return r.tracks??[]}],
   ["us_smart",async()=>{const r=await recommendMusic({STATE},{language:"us",genre:"pop",mode:"smart",count:5});return r.tracks??[]}],
   ["us_new",async()=>{const r=await recommendMusic({STATE},{language:"us",genre:"pop",mode:"new",count:5});return r.tracks??[]}]
