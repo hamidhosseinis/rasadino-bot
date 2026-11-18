@@ -65,9 +65,10 @@ test("10-minute Cron refreshes KV without any Telegram broadcast",async t=>{
   assert.ok(snapshot.btc.updatedAt);
   assert.ok(snapshot.usdt.updatedAt);
   assert.ok(snapshot.gold.updatedAt);
+  assert.ok(snapshot.usd.updatedAt);
   assert.equal(calls.filter(x=>x.includes("api.telegram.org")).length,0);
   assert.equal(calls.filter(x=>x.includes("coingecko")).length,1);
-  assert.equal(calls.filter(x=>x.includes("tgju.org/profile/")).length,2);
+  assert.equal(calls.filter(x=>x.includes("tgju.org/profile/")).length,3);
 });
 
 test("on-demand API and Telegram requests reuse the saved snapshot",async t=>{
@@ -79,6 +80,9 @@ test("on-demand API and Telegram requests reuse the saved snapshot",async t=>{
   assert.equal(response.status,200);
   const json=await response.json();
   assert.equal(json.quotes.btc.value,100000);
+  assert.ok(json.quotes.usd.value>0);
+  assert.match(json.report,/دلار آزاد/);
+  assert.match(json.report,/۱۳۵۷/);
   assert.equal(json.quotes.btc.stale,false);
   const update={update_id:42,message:{chat:{type:"private",id:555},from:{id:555},text:"/price"}};
   const telegramResponse=await worker.fetch(new Request("https://example.invalid/telegram",{
@@ -101,6 +105,8 @@ test("a provider outage preserves recent quotes per asset",async t=>{
   assert.equal(next.usdt.value,initial.usdt.value);
   assert.equal(next.gold.value,initial.gold.value);
   assert.equal(next.gold.updatedAt,initial.gold.updatedAt);
+  assert.equal(next.usd.value,initial.usd.value);
+  assert.equal(next.usd.updatedAt,initial.usd.updatedAt);
 });
 
 test("quotes over 20 minutes old are not shown as current",async t=>{
@@ -112,12 +118,15 @@ test("quotes over 20 minutes old are not shown as current",async t=>{
   const snapshot={at:recentlyChecked,
     btc:{value:80000,source:"CoinGecko",updatedAt:old},
     usdt:{value:100000,source:"TGJU",updatedAt:old},
-    gold:{value:6000000,source:"TGJU",updatedAt:old}};
+    gold:{value:6000000,source:"TGJU",updatedAt:old},
+    usd:{value:100000,source:"TGJU",updatedAt:old}};
   e.STATE.data.set("prices:latest:v1",JSON.stringify(snapshot));
   const visible=await prices(e);
   assert.equal(visible.btc.value,null);
   assert.equal(visible.usdt.value,null);
   assert.equal(visible.gold.value,null);
+  assert.equal(visible.usd.value,null);
+  assert.equal(visible.usd.stale,true);
   assert.equal(visible.btc.stale,true);
   assert.equal(calls.length,0);
 });
