@@ -146,7 +146,7 @@ test("a provider outage preserves recent quotes per asset",async t=>{
   assert.equal(next.oil.updatedAt,initial.oil.updatedAt);
 });
 
-test("quotes over 20 minutes old are not shown as current",async t=>{
+test("crypto and gold over 20 minutes are hidden while dated oil can be retained",async t=>{
   const {calls}=interceptFetch(t);
   const e=makeEnv();
   const now=Date.now();
@@ -163,8 +163,10 @@ test("quotes over 20 minutes old are not shown as current",async t=>{
   assert.equal(visible.btc.value,null);
   assert.equal(visible.usdt.value,null);
   assert.equal(visible.gold.value,null);
-  assert.equal(visible.oil.value,null);
-  assert.equal(visible.oil.stale,true);
+  // Oil can safely reuse the last validated quote within 48 hours, with an explicit delay flag.
+  assert.equal(visible.oil.value,90.5);
+  assert.equal(visible.oil.delayed,true);
+  assert.equal(visible.oil.stale,false);
   assert.equal(visible.usd,undefined);
   assert.equal(visible.btc.stale,true);
   assert.equal(calls.length,0);
