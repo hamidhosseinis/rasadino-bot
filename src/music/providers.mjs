@@ -4,7 +4,12 @@ const SAFE_HTTPS = /^https:\/\//i;
 export function officialLink(raw, provider) {
   if (typeof raw !== "string" || raw.length > 1300 || !SAFE_HTTPS.test(raw)) return null;
   try {
-    const url = new URL(raw);
+    // The Audius REST API currently returns root-relative permalinks such as
+    // /artist/track; anchor them on the verified Audius domain.
+    const target = provider === "audius" &&
+      /^\/(?!\/)[^\\\s?#]{2,1000}$/.test(raw)
+      ? "https://audius.co" + raw : raw;
+    const url = new URL(target);
     const hosts = provider === "itunes"
       ? ["music.apple.com", "itunes.apple.com"]
       : provider === "audius" ? ["audius.co", "www.audius.co"] : [];
