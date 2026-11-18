@@ -35,8 +35,19 @@ function stubTelegram(t) {
   const original = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options={}) => {
-    assert.ok(String(url).startsWith("https://api.telegram.org/botFAKE_STAGE4_TOKEN/"),"Unexpected provider/network request");
-    const method = String(url).split("/").at(-1);
+    const endpoint=String(url);
+    if(endpoint.startsWith("https://itunes.apple.com/search?"))return {
+      ok:true,status:200,json:async()=>({resultCount:1,results:[{
+        kind:"song",wrapperType:"track",trackId:32423,trackName:"Test Rock",
+        artistName:"Test Band",collectionName:"Album",releaseDate:"2026-08-10",
+        primaryGenreName:"Rock",trackViewUrl:"https://music.apple.com/us/album/test/32423?i=32423"
+      }]})
+    };
+    if(endpoint.startsWith("https://api.audius.co/v1/tracks/search?"))return {
+      ok:true,status:200,json:async()=>({data:[]})
+    };
+    assert.ok(endpoint.startsWith("https://api.telegram.org/botFAKE_STAGE4_TOKEN/"),"Unexpected provider/network request");
+    const method = endpoint.split("/").at(-1);
     const payload = JSON.parse(options.body || "{}");
     calls.push({method,payload});
     return {ok:true, status:200, json:async () => ({ok:true,result:true})};
@@ -156,7 +167,8 @@ test("real Worker routes /music and inline callbacks using only fake Telegram an
   assert.match(last(calls,"editMessageText").text,/منو بسته شد/);
   const user=JSON.parse(await env.STATE.get("user:77601"));
   assert.equal(user.notifications_enabled,false);
-  assert.equal([...env.STATE.values.keys()].filter(x=>x.startsWith("music:")).length,0);
+  assert.equal([...env.STATE.values.keys()].filter(x=>x.startsWith("music:user:") || x.startsWith("music:pending:")).length,0);
+  assert.ok([...env.STATE.values.keys()].some(x=>x.startsWith("music:recommend:v1:")));
   assert.equal(calls.filter(x=>x.method==="sendMessage").length,1);
 });
 
