@@ -969,7 +969,7 @@ async function brentEiaCsvPrice(url,source) {
   });
   if(!response.ok)throw Error(source+" HTTP "+response.status);
   const csv=await response.text();
-  if(csv.length<40 || csv.length>2000000)throw Error(source+" invalid CSV size");
+  if(csv.length<20 || csv.length>2000000)throw Error(source+" invalid CSV size");
   const lines=csv.trim().split(/\r?\n/);
   const header=lines.shift()?.replace(/^\uFEFF/,"").toLowerCase().split(",").map(s=>s.trim())||[];
   const dateIdx=header.findIndex(x=>x==="date"||x==="observation_date");
