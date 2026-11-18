@@ -2,7 +2,7 @@
 // Provider URLs are constructed from fixed hosts; outward links are restricted to official domains.
 const SAFE_HTTPS = /^https:\/\//i;
 export function officialLink(raw, provider) {
-  if (typeof raw !== "string" || raw.length > 1300) return null;
+  if (typeof raw !== "string" || raw.length > 1300 || /[\u0000-\u001f\u007f-\u009f]/.test(raw)) return null;
   const isAudiusRelative = provider === "audius" &&
     /^\/(?!\/)[^\\\s?#]{2,1000}$/.test(raw);
   if (!SAFE_HTTPS.test(raw) && !isAudiusRelative) return null;
