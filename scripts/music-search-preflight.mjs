@@ -1,5 +1,5 @@
 // Stage 5 provider smoke check. Public search metadata only. No API keys, chat IDs, media or caching.
-import {searchITunes,searchAudius} from "../src/music/providers.mjs";
+import {searchITunes,searchAudius,normalizeAudius,officialLink} from "../src/music/providers.mjs";
 const tasks=[
   ["itunes_us",()=>searchITunes("Taylor Swift")],
   ["itunes_persian_artist",()=>searchITunes("Googoosh")],
@@ -37,6 +37,13 @@ try {
     data_count:list.length,
     top_level_keys:Object.keys(data??{}).slice(0,10),
     item_field_types:Object.fromEntries(["id","title","permalink","user","genre"].map(k=>[k,typeof first[k]])),
-    user_field_types:Object.fromEntries(["name","handle"].map(k=>[k,typeof first.user?.[k]]))
+    user_field_types:Object.fromEntries(["name","handle"].map(k=>[k,typeof first.user?.[k]])),
+    id_pattern_match:typeof first.id==="string" && /^[A-Za-z0-9_-]{2,80}$/.test(first.id),
+    title_present:typeof first.title==="string" && first.title.trim().length>0,
+    artist_present:typeof first.user?.name==="string" && first.user.name.trim().length>0,
+    official_link_accepted:Boolean(officialLink(first.permalink,"audius")),
+    normalized:Boolean(normalizeAudius(first)),
+    permalink_is_absolute:typeof first.permalink==="string" && first.permalink.startsWith("https://"),
+    permalink_host:(()=>{try{return new URL(first.permalink).host}catch{return "not_absolute"}})()
   }));
 }catch(e){console.log("audius_response_shape: unavailable ("+(e?.name??"network")+")");}
