@@ -53,7 +53,14 @@ export function normalizeAudius(item) {
   if (!item || typeof item.id !== "string" || !/^[A-Za-z0-9_-]{2,80}$/.test(item.id)) return null;
   const title = safeText(item.title);
   const artist = safeText(item.user?.name);
-  const playUrl = officialLink(item.permalink,"audius");
+  // Audius API search uses site-relative permalinks ("/artist/track").
+  // Resolve only a single leading slash against Audius itself. Never accept
+  // protocol-relative links, backslashes, or user-controlled external hosts.
+  const rawLink = item.permalink;
+  const relative = typeof rawLink === "string" && rawLink.startsWith("/")
+    && !rawLink.startsWith("//") && !rawLink.includes("\\")
+    && !/[\u0000-\u001f\u007f]/.test(rawLink);
+  const playUrl = officialLink(relative ? "https://audius.co" + rawLink : rawLink, "audius");
   if (!title || !artist || !playUrl) return null;
   return {
     id:"audius:" + item.id, title, artist, album:null,
