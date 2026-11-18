@@ -260,3 +260,34 @@ test("saved oil quote survives short outages but visibly signals delay",async t=
   assert.match(body.report,/آخرین نرخ ذخیره‌شده/);
   assert.match(body.report,/📅 تاریخ نرخ جهانی/);
 });
+
+test("missing oil quote recovers on demand after 90 seconds even if KV is recent",async t=>{
+  const {calls}=interceptFetch(t);
+  const e=makeEnv();
+  const at=new Date(Date.now()-2*60*1000).toISOString();
+  e.STATE.data.set("prices:latest:v1",JSON.stringify({at,
+    btc:{value:100000,source:"CoinGecko",updatedAt:at},
+    gold:{value:5000000,source:"TGJU",updatedAt:at},
+    usdt:{value:100000,source:"TGJU",updatedAt:at},
+    oil:{value:null,source:"unavailable",updatedAt:null}
+  }));
+  const latest=await prices(e);
+  assert.equal(latest.oil.value,93.33);
+  assert.ok(calls.some(x=>x.includes("americasoilwatch.com/api/v1/brent")));
+  assert.equal(calls.filter(x=>x.includes("api.telegram.org")).length,0);
+});
+
+test("recently failed oil quote respects 90-second recovery cooldown",async t=>{
+  const {calls}=interceptFetch(t);
+  const e=makeEnv();
+  const at=new Date(Date.now()-10*1000).toISOString();
+  e.STATE.data.set("prices:latest:v1",JSON.stringify({at,
+    btc:{value:100000,source:"CoinGecko",updatedAt:at},
+    gold:{value:5000000,source:"TGJU",updatedAt:at},
+    usdt:{value:100000,source:"TGJU",updatedAt:at},
+    oil:{value:null,source:"unavailable",updatedAt:null}
+  }));
+  const q=await prices(e);
+  assert.equal(q.oil.value,null);
+  assert.equal(calls.length,0);
+});
