@@ -1,0 +1,29 @@
+name: Rasadino Music stage 5 (local workerd smoke)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feature/music-stage3-20261118"]
+    paths:
+      - "src/music/providers.mjs"
+      - "src/music/search.mjs"
+      - "src/worker.mjs"
+      - "scripts/music-workerd-*.mjs"
+      - ".github/workflows/music-workerd-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  local-workerd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install local workerd test runtime only
+        run: npm install --no-save --no-package-lock miniflare@3
+      - name: Test runtime integration without secrets or cloud deployment
+        run: node scripts/music-workerd-smoke.mjs
