@@ -37,11 +37,11 @@ jobs:
            } catch(e) {console.log(JSON.stringify({url,error:String(e)}));}
           }
           JS
-      - name: Smoke staged Cloudflare Brent source
+      - name: Smoke production Cloudflare Brent source after version deployment
         shell: bash
         run: |
           node --input-type=module <<'JS'
-          const url='https://be8f1d0d-hamid-price-report-bot.mahale-market-kordkuy.workers.dev/prices';
+          const url='https://hamid-price-report-bot.mahale-market-kordkuy.workers.dev/prices';
           try{
             const r=await fetch(url,{signal:AbortSignal.timeout(28000),headers:{'Accept':'application/json'}});
             const raw=await r.text();
