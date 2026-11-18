@@ -37,6 +37,7 @@ function fakeState() {
     data,operations,
     async get(key){operations.push({action:"get",key});return data.get(key)??null;},
     async put(key,value,opts={}){operations.push({action:"put",key,opts});data.set(key,value);},
+    async delete(key){operations.push({action:"delete",key});data.delete(key);},
     async list(){return {keys:[],list_complete:true};}
   };
 }
@@ -222,4 +223,66 @@ test("forged group request or invalid input cannot trigger metadata provider cal
   assert.equal((await send({update_id:1002,message:{chat:{id:77202,type:"private"},from:{id:77202},text:"/findmusic xx blah"}})).status,200);
   assert.equal(calls.length,1);
   assert.match(JSON.parse(calls[0].opts.body).text,/دستور نامعتبر/);
+});
+
+test("language-specific search callback accepts the next plain message and clears temporary state",async t=>{
+  const STATE=fakeState(),env={STATE,BOT_TOKEN:"FAKE_MUSIC_TOKEN",WEBHOOK_SECRET:"FAKE_MUSIC_WEBHOOK"};
+  const original=globalThis.fetch;
+  const calls=[];
+  globalThis.fetch=async(url,options={})=>{
+    const u=new URL(String(url));
+    if(u.hostname==="api.telegram.org"){
+      calls.push({method:u.pathname.split("/").at(-1),payload:JSON.parse(options.body)});
+      return response({ok:true,result:true});
+    }
+    if(u.hostname==="itunes.apple.com")return response({resultCount:1,results:[itunesTrack(22,"Koocheh","Googoosh")]});
+    if(u.hostname==="api.audius.co")return response({data:[]});
+    throw Error("Unexpected network request");
+  };
+  t.after(()=>{globalThis.fetch=original});
+  const deliver=(update)=>worker.fetch(new Request("https://example.invalid/telegram",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","X-Telegram-Bot-Api-Secret-Token":env.WEBHOOK_SECRET},
+    body:JSON.stringify(update)
+  }),env);
+  const cb={update_id:20100,callback_query:{id:"pending-20100",data:"music:search:fa",
+    from:{id:55112},message:{message_id:55,chat:{id:55112,type:"private"}}}};
+  assert.equal((await deliver(cb)).status,200);
+  assert.equal(STATE.data.get("music:pending:55112"),"fa");
+  assert.equal(STATE.operations.find(x=>x.key==="music:pending:55112"&&x.action==="put").opts.expirationTtl,300);
+  const prompt=calls.filter(x=>x.method==="editMessageText").at(-1).payload.text;
+  assert.match(prompt,/نام آهنگ یا خواننده را در پیام بعدی بفرست/);
+  assert.equal((await deliver({update_id:20101,message:{chat:{id:55112,type:"private"},
+    from:{id:55112},text:"Googoosh"}})).status,200);
+  assert.equal(STATE.data.has("music:pending:55112"),false);
+  const sent=calls.filter(x=>x.method==="sendMessage");
+  assert.equal(sent.length,1);
+  assert.match(sent[0].payload.text,/Koocheh/);
+  assert.equal(STATE.data.has("music:user:55112"),false);
+  assert.equal(calls.filter(x=>x.method==="sendAudio").length,0);
+});
+
+test("leaving music search cancels the pending free-text mode",async t=>{
+  const STATE=fakeState(),env={STATE,BOT_TOKEN:"FAKE_MUSIC_TOKEN",WEBHOOK_SECRET:"FAKE_MUSIC_WEBHOOK"};
+  const original=globalThis.fetch;
+  const calls=[];
+  globalThis.fetch=async(url,opts)=>{
+    assert.ok(String(url).startsWith("https://api.telegram.org/"));
+    calls.push({url:String(url),payload:JSON.parse(opts.body)});
+    return response({ok:true,result:true});
+  };
+  t.after(()=>{globalThis.fetch=original});
+  const deliver=update=>worker.fetch(new Request("https://example.invalid/telegram",{
+    method:"POST",headers:{"Content-Type":"application/json","X-Telegram-Bot-Api-Secret-Token":env.WEBHOOK_SECRET},
+    body:JSON.stringify(update)
+  }),env);
+  const cb=(update_id,data)=>({update_id,callback_query:{id:"cb-"+update_id,data,
+    from:{id:66101},message:{message_id:23,chat:{id:66101,type:"private"}}}});
+  await deliver(cb(30200,"music:search:us"));
+  assert.equal(STATE.data.get("music:pending:66101"),"us");
+  await deliver(cb(30201,"music:home"));
+  assert.equal(STATE.data.has("music:pending:66101"),false);
+  await deliver({update_id:30202,message:{chat:{id:66101,type:"private"},
+    from:{id:66101},text:"Hello"}}); // without an active search, open the main menu.
+  assert.match(calls.at(-1).payload.text,/خوش آمدی/);
 });
