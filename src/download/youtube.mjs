@@ -1,4 +1,4 @@
-// YouTube URL validation and a private, opt-in file-delivery backend.
+// YouTube URL validation and a public, authenticated file-delivery backend.
 // Workers cannot run yt-dlp; no download is claimed unless a backend accepts a job.
 export const YOUTUBE_PENDING_PREFIX = "download:youtube:pending:";
 export const YOUTUBE_PENDING_TTL = 300;
