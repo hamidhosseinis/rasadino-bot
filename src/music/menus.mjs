@@ -70,7 +70,7 @@ function typeLabel(kind) {
 export function musicMenuView(action = "music:home") {
   if (action === "music:home") {
     return view(
-      "🎧 رصد موزیک\n\nزبان موسیقی را انتخاب کن.\n\n🔎 برای جست‌وجوی واقعی زبان را انتخاب کن؛ پیشنهادهای ژانری هم فعال شده‌اند.\nℹ️ یادگیری سلیقه و ترندهای معتبر روزانه هنوز تکمیل نشده است.",
+      "🎧 رصد موزیک | زبان موسیقی را انتخاب کن.\nℹ️ ترند امروز و شخصی‌سازی هنوز فعال نیست.",
       [
         [button(LANGUAGES.fa, "music:lang:fa")],
         [button(LANGUAGES.us, "music:lang:us")],
@@ -87,10 +87,10 @@ export function musicMenuView(action = "music:home") {
     const lang = parts[2];
     if (!Object.hasOwn(GENRES, lang)) return null;
     const note = lang === "us"
-      ? "\nجست‌وجو از کاتالوگ آمریکایی و Audius انجام می‌شود؛ ملیت و زبان آهنگ‌ها قطعی تأیید نمی‌شوند."
+      ? "\nℹ️ کاتالوگ آمریکا؛ ملیت/زبان آهنگ تأیید نشده."
       : "";
     return view(
-      "🎧 رصد موزیک\n🌍 زبان: " + LANGUAGES[lang] + "\n\nژانر موردنظر را انتخاب کن." + note,
+      "🎧 "+LANGUAGES[lang]+" | ژانر را انتخاب کن."+note,
       [
         [button("🔎 جست‌وجوی آهنگ یا خواننده", "music:search:" + lang)],
         ...compact(GENRES[lang].map(([id, label]) =>
@@ -104,15 +104,9 @@ export function musicMenuView(action = "music:home") {
     const lang = parts[2];
     if (!Object.hasOwn(LANGUAGES, lang)) return null;
     return view(
-      "🔎 جست‌وجوی موسیقی" +
-      "\n🌍 زبان: " + LANGUAGES[lang] +
-      "\n\n✅ حالا نام آهنگ یا خواننده را در پیام بعدی بفرست." +
-      "\nیا با دستور زیر مستقیماً جست‌وجو کن:" +
-      "\n" + (lang === "fa" ? "/findmusic fa گوگوش" : "/findmusic us Taylor Swift") +
-      "\n\n⏳ این حالت جست‌وجو تا ۵ دقیقه فعال می‌ماند." +
-      "\nℹ️ جست‌وجو نام و خواننده را در منابع مجاز بررسی می‌کند." +
-      "\nنتایج جست‌وجو به معنی رتبه‌بندی یا تأیید ملیت هنرمند نیستند." +
-      "\nهیچ فایل صوتی دانلود یا بازنشر نمی‌شود.",
+      "🔎 "+LANGUAGES[lang]+"\nنام آهنگ یا خواننده را در پیام بعدی بفرست (تا ۵ دقیقه)." +
+      "\nمثال: "+(lang==="fa"?"/findmusic fa گوگوش":"/findmusic us Taylor Swift") +
+      "\nℹ️ فقط لینک رسمی؛ فایل صوتی ارسال نمی‌شود.",
       footer("music:lang:" + lang)
     );
   }
@@ -122,8 +116,7 @@ export function musicMenuView(action = "music:home") {
     const name = genreLabel(lang, genre);
     if (!name) return null;
     return view(
-      "🎧 رصد موزیک\n🌍 زبان: " + LANGUAGES[lang] +
-      "\n🎼 ژانر: " + name + "\n\nنوع پیشنهاد را انتخاب کن.",
+      "🎧 "+LANGUAGES[lang]+" | "+name+"\nنوع پیشنهاد را انتخاب کن:",
       [
         ...TYPES.map(([id, label]) => [button(label + (id==="today"?" (بدون منبع روزانه)":lang==="fa"&&["week","classic","hidden"].includes(id)?" (نیازمند جدول فارسی)":""), "music:type:" + lang + ":" + genre + ":" + id)]),
         ...footer("music:lang:" + lang)
@@ -137,9 +130,7 @@ export function musicMenuView(action = "music:home") {
     const recommended = typeLabel(kind);
     if (!name || !recommended) return null;
     return view(
-      "🎧 رصد موزیک\n🌍 زبان: " + LANGUAGES[lang] +
-      "\n🎼 ژانر: " + name + "\n📌 نوع: " + recommended +
-      "\n\nتعداد آهنگ‌ها را انتخاب کن.\nپیش‌فرض: ۵ آهنگ.",
+      "🎧 "+LANGUAGES[lang]+" | "+name+" | "+recommended+"\nتعداد آهنگ‌ها؟ (پیش‌فرض: ۵)",
       [
         ...compact(COUNTS.map(n => button(
           n === 5 ? "۵ آهنگ ⭐ پیش‌فرض" : COUNT_LABELS[n] + " آهنگ",
@@ -157,10 +148,8 @@ export function musicMenuView(action = "music:home") {
     const count = Number(countText);
     if (!name || !recommended || !COUNTS.includes(count) || String(count) !== countText) return null;
     return view(
-      "🎧 خلاصه انتخاب رصد موزیک\n\n🌍 زبان: " + LANGUAGES[lang] +
-      "\n🎼 ژانر: " + name + "\n📌 نوع: " + recommended +
-      "\n🎵 تعداد: " + COUNT_LABELS[count] + " آهنگ" +
-      "\n\n🧪 منو آماده آزمایش است؛ اتصال به منابع موسیقی و ارسال پیشنهاد در مراحل بعد انجام می‌شود.\nهیچ آهنگی ارسال نشده و هیچ اشتراک روزانه‌ای فعال نشده است.",
+      "🎧 "+LANGUAGES[lang]+" | "+name+" | "+recommended+" | "+COUNT_LABELS[count]+" آهنگ" +
+      "\n🧪 خلاصه آزمایشی؛ هیچ آهنگی ارسال نشده و هیچ اشتراک روزانه‌ای فعال نشده است.",
       [
         [button("🔁 تغییر تعداد", "music:type:" + lang + ":" + genre + ":" + kind)],
         ...footer("music:genre:" + lang + ":" + genre)
