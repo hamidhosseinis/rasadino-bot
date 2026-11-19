@@ -55,4 +55,4 @@ const unknown=await request("/music");
 assert.equal(unknown.status,404,"Music commands must remain Telegram-only");
 console.log("PASS /music HTTP: not exposed publicly");
 
-console.log("LIVE RASADINO SMOKE (market pulse v29): 5/5 passed.");
+console.log("LIVE RASADINO SMOKE (market pulse + file-only music v30): 5/5 passed.");
