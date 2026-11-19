@@ -55,3 +55,26 @@ test("music screens are concise while official track links remain",()=>{
   assert.equal(rec.keyboard.inline_keyboard[0][0].url,track.play_url);
   assert.match(rec.text,/۱۸ ماه گذشته/);
 });
+
+test("market pulse HTML highlights only valid quoted amounts and preserves oil trade date",()=>{
+  const at="2026-11-19T04:40:00Z";
+  const quote=value=>({value,updatedAt:at});
+  const pr={at,btc:quote(63440.16),oil:{...quote(91.57),marketDate:"2026-11-18",
+    oilType:"futures",delayed:true},usdt:quote(270361),gold:quote(24459600)};
+  const html=report(pr,"html");
+  const plain=report(pr);
+  assert.match(html,/📡 رصدینو \| نبض بازار/);
+  assert.match(html,/<b>۶۳٬۴۴۰٫۱۶ دلار<\/b>/);
+  assert.match(html,/<b>۹۱٫۵۷ دلار \/ بشکه<\/b>/);
+  assert.match(html,/<b>۲۷۰٬۳۶۱ تومان<\/b>/);
+  assert.match(html,/📅 تاریخ نرخ جهانی/);
+  assert.match(html,/آتی/);
+  assert.match(html,/آخرین نرخ ذخیره‌شده/);
+  assert.match(html,/تتر آن زمان وجود نداشت/);
+  assert.match(html,/شاخص متفاوت/);
+  assert.doesNotMatch(plain,/<b>|<\/b>/);
+  assert.doesNotMatch(html,/💵/);
+  const missing=report({...pr,oil:{value:null,stale:true}},"html");
+  assert.match(missing,/⚠️ نرخ معتبر در دسترس نیست/);
+  assert.doesNotMatch(missing,/<b>در دسترس نیست<\/b>/);
+});
