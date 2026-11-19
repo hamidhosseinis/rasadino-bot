@@ -1,7 +1,7 @@
 
 import {checkMusicSearchRate} from "./music/search.mjs";
 import {validAudioQuery,findAudioFiles,audioHomeView,audioRetryView,audioChoicesView,confidentAudioMatch} from "./music/audio.mjs";
-import {YOUTUBE_PENDING_PREFIX,YOUTUBE_PENDING_TTL,canonicalYouTubeVideoUrl,submitYouTubeJob} from "./download/youtube.mjs";
+import {canonicalYouTubeVideoUrl,submitYouTubeJob} from "./download/youtube.mjs";
 
 const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
@@ -46,7 +46,6 @@ async function telegram(env, method, data = {}) {
 const MAIN_MENU_KEYBOARD = {inline_keyboard:[
   [{text:"💰 قیمت‌ها",callback_data:"price:menu"}, {text:"🌤 آب‌وهوا",callback_data:"weather:menu"}],
   [{text:"📰 اخبار",callback_data:"news:refresh"}, {text:"🎧 رصد موزیک",callback_data:"music:home"}],
-  [{text:"📥 دانلود",callback_data:"download:youtube"}],
   [{text:"📚 منابع",callback_data:"sources:show"}, {text:"💬 پشتیبانی",callback_data:"support:show"}],
   [{text:"❌ بستن منو",callback_data:"menu:close"}]
 ]};
@@ -123,17 +122,7 @@ function priceViewText(pr,asset="all",format="html") {
 async function showMainMenu(env,chatId,messageId=null,note="") {
   return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
 }
-async function clearYouTubePending(env,chatId) {
-  const key=YOUTUBE_PENDING_PREFIX+chatId;
-  if(await env.STATE.get(key))await env.STATE.delete(key);
-}
-async function showYouTubePrompt(env,chatId,messageId=null) {
-  await env.STATE.put(YOUTUBE_PENDING_PREFIX+chatId,"1",{expirationTtl:YOUTUBE_PENDING_TTL});
-  return renderMenu(env,chatId,"📥 لینک ویدئوی یوتیوب را بفرست.",simpleBackKeyboard(),messageId);
-}
 async function handleYouTubeLink(env,chatId,input) {
-  if(!canonicalYouTubeVideoUrl(input))
-    return send(env,chatId,"⚠️ لینک معتبر یوتیوب بفرست.",simpleBackKeyboard());
   const cooldown="download:youtube:cooldown:"+chatId;
   const daily="download:youtube:quota:"+chatId+":"+new Date().toISOString().slice(0,10);
   const quota=Number(await env.STATE.get(daily)||0);
@@ -144,11 +133,9 @@ async function handleYouTubeLink(env,chatId,input) {
   if(result.ok){
     await env.STATE.put(daily,String(quota+1),{expirationTtl:86400});
     await env.STATE.put(cooldown,"1",{expirationTtl:60});
-    await clearYouTubePending(env,chatId);
     return send(env,chatId,"📥 درخواست ثبت شد.",simpleBackKeyboard());
   }
   if(result.reason==="unconfigured"){
-    await clearYouTubePending(env,chatId);
     return send(env,chatId,"⚠️ دانلود فعلاً فعال نیست.",simpleBackKeyboard());
   }
   return send(env,chatId,"⚠️ دریافت ویدئو ممکن نشد؛ دوباره امتحان کن.",simpleBackKeyboard());
@@ -469,20 +456,16 @@ async function onCallbackQuery(query,env) {
   const messageId=query.message?.message_id||null;
   const action=query.data;
   if(action==="main:menu"){
-    await clearYouTubePending(env,chatId);
     await clearPendingMusic(env,chatId);
     return showMainMenu(env,chatId,messageId);
   }
   if(action==="menu:close"){
-    await clearYouTubePending(env,chatId);
     await clearPendingMusic(env,chatId);
     return renderMenu(env,chatId,
       "✅ منو بسته شد | بازکردن: /menu",
       {inline_keyboard:[]},messageId);
   }
-  if(action==="download:youtube")return showYouTubePrompt(env,chatId,messageId);
   if(action.startsWith("music:")){
-    await clearYouTubePending(env,chatId);
     if(/^music:pick:[0-2]$/.test(action)){
       const raw=await env.STATE.get(MUSIC_CHOICES_PREFIX+chatId);
       let files;
@@ -1331,8 +1314,10 @@ async function onTelegram(update, env) {
   const user=await registerUser(env,chatId);
   await removeLegacyKeyboardOnce(env,chatId);
 
+  // A pasted YouTube video URL takes priority over music search; no button or /download is needed.
+  if(canonicalYouTubeVideoUrl(line))return handleYouTubeLink(env,chatId,line);
+
   if(cmd==="/start" || cmd==="/menu" || line==="🚀 شروع"){
-    await clearYouTubePending(env,chatId);
     await clearPendingMusic(env,chatId);
     return showMainMenu(env,chatId,null,
       user.notifications_enabled?"🔔 اعلان قیمت روشن":"🔕 اعلان قیمت خاموش | /subscribe");
@@ -1345,7 +1330,6 @@ async function onTelegram(update, env) {
     return send(env,chatId,sourcesMessage(),simpleBackKeyboard());
   if(cmd==="/news" || line==="📰 اخبار")
     return sendGolestanNews(env,chatId,true,0);
-  if(cmd==="/download" || line==="📥 دانلود")return showYouTubePrompt(env,chatId);
   if(cmd==="/music" || line==="🎧 رصد موزیک")return musicFilePrompt(env,chatId);
   if(cmd==="/findmusic"){
     const query=line.replace(/^\/findmusic(?:@[a-zA-Z0-9_]+)?(?:\s+(?:fa|us))?\s*/i,"");
@@ -1367,15 +1351,13 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 موزیک /music | 📥 دانلود ویدئو /download\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
+      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 موزیک /music | 🎬 ویدئو: ارسال لینک یوتیوب\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
     return send(env,chatId,"⏸ اعلان قیمت خاموش شد | روشن‌کردن: /subscribe",simpleBackKeyboard());
   }
   if (!line.startsWith("/")) {
-    if(await env.STATE.get(YOUTUBE_PENDING_PREFIX+chatId))
-      return handleYouTubeLink(env,chatId,line);
     const pending=await env.STATE.get(MUSIC_PENDING_PREFIX+chatId);
     if (pending==="file" || pending==="fa" || pending==="us") {
       return performMusicFileSearch(env,chatId,line);
