@@ -1,6 +1,7 @@
 
 import {checkMusicSearchRate} from "./music/search.mjs";
 import {validAudioQuery,findAudioFiles,audioHomeView,audioRetryView,audioChoicesView,confidentAudioMatch} from "./music/audio.mjs";
+import {canonicalYouTubeVideoUrl,submitYouTubeJob} from "./download/youtube.mjs";
 
 const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
@@ -45,6 +46,7 @@ async function telegram(env, method, data = {}) {
 const MAIN_MENU_KEYBOARD = {inline_keyboard:[
   [{text:"💰 قیمت‌ها",callback_data:"price:menu"}, {text:"🌤 آب‌وهوا",callback_data:"weather:menu"}],
   [{text:"📰 اخبار",callback_data:"news:refresh"}, {text:"🎧 رصد موزیک",callback_data:"music:home"}],
+  [{text:"📥 دانلود",callback_data:"download:youtube"}],
   [{text:"📚 منابع",callback_data:"sources:show"}, {text:"💬 پشتیبانی",callback_data:"support:show"}],
   [{text:"❌ بستن منو",callback_data:"menu:close"}]
 ]};
@@ -120,6 +122,27 @@ function priceViewText(pr,asset="all",format="html") {
 }
 async function showMainMenu(env,chatId,messageId=null,note="") {
   return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
+}
+async function showYouTubePrompt(env,chatId,messageId=null) {
+  return renderMenu(env,chatId,"📥 لینک ویدئوی یوتیوب را بفرست.",simpleBackKeyboard(),messageId);
+}
+async function handleYouTubeLink(env,chatId,input) {
+  const cooldown="download:youtube:cooldown:"+chatId;
+  const daily="download:youtube:quota:"+chatId+":"+new Date().toISOString().slice(0,10);
+  const quota=Number(await env.STATE.get(daily)||0);
+  if(quota>=3)return send(env,chatId,"⌛ سهمیه امروز تمام شد.",simpleBackKeyboard());
+  if(await env.STATE.get(cooldown))
+    return send(env,chatId,"⌛ کمی بعد دوباره امتحان کن.",simpleBackKeyboard());
+  const result=await submitYouTubeJob(env,chatId,input);
+  if(result.ok){
+    await env.STATE.put(daily,String(quota+1),{expirationTtl:86400});
+    await env.STATE.put(cooldown,"1",{expirationTtl:60});
+    return send(env,chatId,"📥 درخواست ثبت شد.",simpleBackKeyboard());
+  }
+  if(result.reason==="unconfigured"){
+    return send(env,chatId,"⚠️ دانلود فعلاً فعال نیست.",simpleBackKeyboard());
+  }
+  return send(env,chatId,"⚠️ دریافت ویدئو ممکن نشد؛ دوباره امتحان کن.",simpleBackKeyboard());
 }
 async function showPriceMenu(env,chatId,messageId=null) {
   return renderMenu(env,chatId,"💰 قیمت‌ها | انتخاب کن:",priceMenuKeyboard(),messageId);
@@ -446,6 +469,7 @@ async function onCallbackQuery(query,env) {
       "✅ منو بسته شد | بازکردن: /menu",
       {inline_keyboard:[]},messageId);
   }
+  if(action==="download:youtube")return showYouTubePrompt(env,chatId,messageId);
   if(action.startsWith("music:")){
     if(/^music:pick:[0-2]$/.test(action)){
       const raw=await env.STATE.get(MUSIC_CHOICES_PREFIX+chatId);
@@ -1284,7 +1308,7 @@ async function installWebhook(env) {
 
 async function onTelegram(update, env) {
   const m=update?.message;
-  if(!m || m.chat?.type!=="private" || typeof m.text!=="string")return;
+  if(!m || m.chat?.type!=="private" || String(m.from?.id)!==String(m.chat?.id) || typeof m.text!=="string")return;
   const chatId=String(m.chat.id);
   const line=m.text.trim();
   const [rawCmd,maybePin]=line.split(/\s+/,2);
@@ -1294,6 +1318,9 @@ async function onTelegram(update, env) {
     await env.STATE.put("owner_chat_id",chatId);
   const user=await registerUser(env,chatId);
   await removeLegacyKeyboardOnce(env,chatId);
+
+  // A valid YouTube video URL works without using the download button or /download.
+  if(canonicalYouTubeVideoUrl(line))return handleYouTubeLink(env,chatId,line);
 
   if(cmd==="/start" || cmd==="/menu" || line==="🚀 شروع"){
     await clearPendingMusic(env,chatId);
@@ -1308,6 +1335,7 @@ async function onTelegram(update, env) {
     return send(env,chatId,sourcesMessage(),simpleBackKeyboard());
   if(cmd==="/news" || line==="📰 اخبار")
     return sendGolestanNews(env,chatId,true,0);
+  if(cmd==="/download" || line==="📥 دانلود")return showYouTubePrompt(env,chatId);
   if(cmd==="/music" || line==="🎧 رصد موزیک")return musicFilePrompt(env,chatId);
   if(cmd==="/findmusic"){
     const query=line.replace(/^\/findmusic(?:@[a-zA-Z0-9_]+)?(?:\s+(?:fa|us))?\s*/i,"");
@@ -1329,7 +1357,7 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 دریافت فایل موزیک /music | /findmusic نام آهنگ\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
+      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 موزیک /music | 📥 دانلود /download\n🎬 با ارسال مستقیم لینک یوتیوب هم درخواست ثبت می‌شود.\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
