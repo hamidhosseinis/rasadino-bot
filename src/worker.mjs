@@ -128,6 +128,10 @@ async function showMainMenu(env,chatId,messageId=null,note="") {
     : MAIN_MENU_KEYBOARD;
   return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),keyboard,messageId);
 }
+async function clearYouTubePending(env,chatId) {
+  const key=YOUTUBE_PENDING_PREFIX+chatId;
+  if(await env.STATE.get(key))await env.STATE.delete(key);
+}
 async function showYouTubePrompt(env,chatId,messageId=null) {
   const owner=await env.STATE.get("owner_chat_id");
   if(!owner || String(owner)!==String(chatId))return showMainMenu(env,chatId,messageId);
@@ -143,11 +147,11 @@ async function handleYouTubeLink(env,chatId,input) {
   const result=await submitYouTubeJob(env,chatId,input);
   if(result.ok){
     await env.STATE.put(cooldown,"1",{expirationTtl:60});
-    await env.STATE.delete(YOUTUBE_PENDING_PREFIX+chatId);
+    await clearYouTubePending(env,chatId);
     return send(env,chatId,"📥 درخواست ثبت شد.",simpleBackKeyboard());
   }
   if(result.reason==="unconfigured"){
-    await env.STATE.delete(YOUTUBE_PENDING_PREFIX+chatId);
+    await clearYouTubePending(env,chatId);
     return send(env,chatId,"⚠️ دانلود فعلاً فعال نیست.",simpleBackKeyboard());
   }
   return send(env,chatId,"⚠️ دریافت ویدئو ممکن نشد؛ دوباره امتحان کن.",simpleBackKeyboard());
@@ -468,12 +472,12 @@ async function onCallbackQuery(query,env) {
   const messageId=query.message?.message_id||null;
   const action=query.data;
   if(action==="main:menu"){
-    await env.STATE.delete(YOUTUBE_PENDING_PREFIX+chatId);
+    await clearYouTubePending(env,chatId);
     await clearPendingMusic(env,chatId);
     return showMainMenu(env,chatId,messageId);
   }
   if(action==="menu:close"){
-    await env.STATE.delete(YOUTUBE_PENDING_PREFIX+chatId);
+    await clearYouTubePending(env,chatId);
     await clearPendingMusic(env,chatId);
     return renderMenu(env,chatId,
       "✅ منو بسته شد | بازکردن: /menu",
@@ -481,7 +485,7 @@ async function onCallbackQuery(query,env) {
   }
   if(action==="download:youtube")return showYouTubePrompt(env,chatId,messageId);
   if(action.startsWith("music:")){
-    await env.STATE.delete(YOUTUBE_PENDING_PREFIX+chatId);
+    await clearYouTubePending(env,chatId);
     if(/^music:pick:[0-2]$/.test(action)){
       const raw=await env.STATE.get(MUSIC_CHOICES_PREFIX+chatId);
       let files;
@@ -1331,7 +1335,7 @@ async function onTelegram(update, env) {
   await removeLegacyKeyboardOnce(env,chatId);
 
   if(cmd==="/start" || cmd==="/menu" || line==="🚀 شروع"){
-    await env.STATE.delete(YOUTUBE_PENDING_PREFIX+chatId);
+    await clearYouTubePending(env,chatId);
     await clearPendingMusic(env,chatId);
     return showMainMenu(env,chatId,null,
       user.notifications_enabled?"🔔 اعلان قیمت روشن":"🔕 اعلان قیمت خاموش | /subscribe");
