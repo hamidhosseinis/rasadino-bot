@@ -30,12 +30,18 @@ assert.equal(p.status,200,"Existing prices route must work");
 const prices=await p.json();
 assert.equal(typeof prices.report,"string");
 assert.ok(prices.quotes && typeof prices.quotes==="object");
-assert.match(prices.report,/^📊 قیمت‌ها/,"Live report should use the compact card");
-assert.equal(prices.report.split("\n").length,6,"Four assets + one header + one disclosure");
-assert.ok(prices.report.length<900,"Market card must remain concise");
-assert.match(prices.report,/نفت خام برنت/);
+assert.match(prices.report,/^📡 رصدینو \| نبض بازار/,"Live report should use market pulse layout");
+assert.match(prices.report,/بیت‌کوین \| BTC/);
+assert.match(prices.report,/نفت خام برنت \| BRENT/);
+assert.match(prices.report,/تتر \| USDT/);
+assert.match(prices.report,/طلای ۱۸ عیار \| GOLD/);
+assert.match(prices.report,/مبدأ مقایسه:/);
+assert.match(prices.report,/رشد تاریخی:/);
+assert.ok(prices.report.split("\n").length>=21,"Must show separated asset cards and provenance");
+assert.ok(prices.report.length<1200,"Market card must remain concise");
+assert.doesNotMatch(prices.report,/<b>|<\/b>/,"Public JSON report should remain plain text");
 assert.doesNotMatch(prices.report,/CoinGecko|Coinbase|tgju\.org/,"Sources belong behind the sources button");
-console.log("PASS /prices: compact four-asset report, valid quotes and source isolation");
+console.log("PASS /prices: 4 market pulse cards, 2 historical baselines, plain JSON and valid quotes");
 
 const unauthorized=await request("/telegram",{
   method:"POST",
@@ -49,4 +55,4 @@ const unknown=await request("/music");
 assert.equal(unknown.status,404,"Music commands must remain Telegram-only");
 console.log("PASS /music HTTP: not exposed publicly");
 
-console.log("LIVE RASADINO SMOKE (compact UI): 5/5 passed.");
+console.log("LIVE RASADINO SMOKE (market pulse v29): 5/5 passed.");
