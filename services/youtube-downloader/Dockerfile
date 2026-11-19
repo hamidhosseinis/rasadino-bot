@@ -5,5 +5,5 @@ RUN pip install --no-cache-dir -r requirements.txt \
  && useradd --create-home --uid 10001 downloader
 COPY app.py .
 USER downloader
-EXPOSE 8080
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+EXPOSE 10000
+CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-10000}"]
