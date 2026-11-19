@@ -1,5 +1,5 @@
 import {findAudioFiles} from "../src/music/audio.mjs";
-const samples=["Beethoven","piano","Fur Elise","music","song"];
+const samples=["Variations for flute and piano","Beethoven","piano","Fur Elis"];
 for(const name of samples){
   const url=new URL("https://commons.wikimedia.org/w/api.php");
   for(const [k,v] of Object.entries({
