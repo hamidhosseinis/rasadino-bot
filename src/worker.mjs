@@ -406,7 +406,7 @@ async function performMusicFileSearch(env,chatId,query) {
       const page=audioRetryView("🔎 فایل مجاز این آهنگ پیدا نشد.\nنام خواننده یا بخشی از عنوان رو دقیق‌تر بفرست.");
       return send(env,chatId,page.text,page.keyboard);
     }
-    if(confidentAudioMatch(result.files)){
+    if(confidentAudioMatch(result.files,query)){
       try{return await sendLicensedAudio(env,chatId,result.files[0]);}
       catch{
         const page=audioRetryView("⚠️ فایل پیدا شد ولی ارسالش ممکن نبود؛ آهنگ دیگری امتحان کن.");
