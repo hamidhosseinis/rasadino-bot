@@ -30,7 +30,12 @@ assert.equal(p.status,200,"Existing prices route must work");
 const prices=await p.json();
 assert.equal(typeof prices.report,"string");
 assert.ok(prices.quotes && typeof prices.quotes==="object");
-console.log("PASS /prices: current report and quote object returned (no values logged)");
+assert.match(prices.report,/^📊 قیمت‌ها/,"Live report should use the compact card");
+assert.equal(prices.report.split("\n").length,6,"Four assets + one header + one disclosure");
+assert.ok(prices.report.length<900,"Market card must remain concise");
+assert.match(prices.report,/نفت خام برنت/);
+assert.doesNotMatch(prices.report,/CoinGecko|Coinbase|tgju\.org/,"Sources belong behind the sources button");
+console.log("PASS /prices: compact four-asset report, valid quotes and source isolation");
 
 const unauthorized=await request("/telegram",{
   method:"POST",
@@ -44,4 +49,4 @@ const unknown=await request("/music");
 assert.equal(unknown.status,404,"Music commands must remain Telegram-only");
 console.log("PASS /music HTTP: not exposed publicly");
 
-console.log("LIVE ORIGINAL WORKER SMOKE (Stage 6 rollout): 5/5 passed.");
+console.log("LIVE RASADINO SMOKE (compact UI): 5/5 passed.");
