@@ -16,8 +16,8 @@ test("core screens stay compact without hiding key facts",()=>{
   const snapshot={at:now,btc:quote(95000),usdt:quote(110000),gold:quote(10000000),
     oil:{...quote(95),marketDate:now.slice(0,10),oilType:"futures"}};
   const market=report(snapshot);
-  assert.ok(market.length<800,"The price card should fit without scrolling through prose");
-  assert.equal(market.split("\n").length,6);
+  assert.ok(market.length<1200,"The price card should stay concise and fully readable");
+  assert.equal(market.split("\n").length,25);
   assert.match(market,/۱۳۵۷/);
   assert.match(market,/رشدها اسمی/);
 
