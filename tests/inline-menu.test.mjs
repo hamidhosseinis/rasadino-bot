@@ -163,3 +163,26 @@ test("news page, detail and back edit same message and preserve source link",asy
   assert.equal(detail.message_id,77);
   assert.deepEqual(external,[]);
 });
+
+test("market report supports bold Telegram prices, sources, refresh and return",async t=>{
+  const {calls}=telegramStub(t);
+  const e=env();
+  assert.equal((await deliver(e,message(988,"/price",800))).status,200);
+  const initial=last(calls,"sendMessage");
+  assert.equal(initial.parse_mode,"HTML");
+  assert.match(initial.text,/<b>/);
+  const buttons=initial.reply_markup.inline_keyboard.flat();
+  assert.ok(buttons.some(x=>x.callback_data==="price:sources"));
+  assert.ok(buttons.some(x=>x.callback_data==="price:refresh"));
+  assert.equal((await deliver(e,callback(988,"price:sources",801))).status,200);
+  const source=last(calls,"editMessageText");
+  assert.match(source.text,/📚 منابع اطلاعات/);
+  assert.ok(source.reply_markup.inline_keyboard.flat().some(x=>x.callback_data==="price:all"));
+  assert.equal((await deliver(e,callback(988,"price:all",802))).status,200);
+  const back=last(calls,"editMessageText");
+  assert.equal(back.parse_mode,"HTML");
+  assert.match(back.text,/نبض بازار/);
+  assert.equal((await deliver(e,callback(988,"price:refresh",803))).status,200);
+  assert.equal(last(calls,"editMessageText").parse_mode,"HTML");
+  assert.equal(calls.filter(x=>x.method==="sendMessage").length,1);
+});
