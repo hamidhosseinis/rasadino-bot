@@ -1332,4 +1332,4 @@ export default {
 };
 
 // Export narrow testable helpers; HTTP access still requires the verified webhook.
-export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard, prices, refreshPriceSnapshot, historicalGrowthPercent, priceLine};
+export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard, prices, refreshPriceSnapshot, historicalGrowthPercent, priceLine, welcome, report, sourcesMessage, makeNewsMessage};
