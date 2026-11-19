@@ -119,7 +119,7 @@ test("subscriptions and /stop are independent and never unlink owner", async (t)
   assert.equal(JSON.parse(await e.STATE.get("user:1002")).notifications_enabled,true);
   assert.equal(await e.STATE.get("owner_chat_id"),"1001");
   await message(e,1001,"/status",7);
-  assert.match(calls.at(-1).payload.text,/غیرفعال/);
+  assert.match(calls.at(-1).payload.text,/خاموش/);
 });
 test("callback is accessible to its private-chat user, not impersonators", async (t) => {
   const calls = fakeTelegram(t);
