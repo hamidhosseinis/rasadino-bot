@@ -46,6 +46,7 @@ async function telegram(env, method, data = {}) {
 const MAIN_MENU_KEYBOARD = {inline_keyboard:[
   [{text:"💰 قیمت‌ها",callback_data:"price:menu"}, {text:"🌤 آب‌وهوا",callback_data:"weather:menu"}],
   [{text:"📰 اخبار",callback_data:"news:refresh"}, {text:"🎧 رصد موزیک",callback_data:"music:home"}],
+  [{text:"📥 دانلود",callback_data:"download:youtube"}],
   [{text:"📚 منابع",callback_data:"sources:show"}, {text:"💬 پشتیبانی",callback_data:"support:show"}],
   [{text:"❌ بستن منو",callback_data:"menu:close"}]
 ]};
@@ -121,6 +122,9 @@ function priceViewText(pr,asset="all",format="html") {
 }
 async function showMainMenu(env,chatId,messageId=null,note="") {
   return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
+}
+async function showYouTubePrompt(env,chatId,messageId=null) {
+  return renderMenu(env,chatId,"📥 لینک ویدئوی یوتیوب را بفرست.",simpleBackKeyboard(),messageId);
 }
 async function handleYouTubeLink(env,chatId,input) {
   const cooldown="download:youtube:cooldown:"+chatId;
@@ -465,6 +469,7 @@ async function onCallbackQuery(query,env) {
       "✅ منو بسته شد | بازکردن: /menu",
       {inline_keyboard:[]},messageId);
   }
+  if(action==="download:youtube")return showYouTubePrompt(env,chatId,messageId);
   if(action.startsWith("music:")){
     if(/^music:pick:[0-2]$/.test(action)){
       const raw=await env.STATE.get(MUSIC_CHOICES_PREFIX+chatId);
@@ -1314,7 +1319,7 @@ async function onTelegram(update, env) {
   const user=await registerUser(env,chatId);
   await removeLegacyKeyboardOnce(env,chatId);
 
-  // A pasted YouTube video URL takes priority over music search; no button or /download is needed.
+  // A valid YouTube video URL works without using the download button or /download.
   if(canonicalYouTubeVideoUrl(line))return handleYouTubeLink(env,chatId,line);
 
   if(cmd==="/start" || cmd==="/menu" || line==="🚀 شروع"){
@@ -1330,6 +1335,7 @@ async function onTelegram(update, env) {
     return send(env,chatId,sourcesMessage(),simpleBackKeyboard());
   if(cmd==="/news" || line==="📰 اخبار")
     return sendGolestanNews(env,chatId,true,0);
+  if(cmd==="/download" || line==="📥 دانلود")return showYouTubePrompt(env,chatId);
   if(cmd==="/music" || line==="🎧 رصد موزیک")return musicFilePrompt(env,chatId);
   if(cmd==="/findmusic"){
     const query=line.replace(/^\/findmusic(?:@[a-zA-Z0-9_]+)?(?:\s+(?:fa|us))?\s*/i,"");
@@ -1351,7 +1357,7 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 موزیک /music | 🎬 ویدئو: ارسال لینک یوتیوب\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
+      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 موزیک /music | 📥 دانلود /download\n🎬 با ارسال مستقیم لینک یوتیوب هم درخواست ثبت می‌شود.\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
