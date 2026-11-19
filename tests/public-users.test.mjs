@@ -139,14 +139,14 @@ test("scheduled reports go to subscribed users only; are deduplicated per slot",
   await message(e,4003,"/start",11);
   await message(e,4002,"/subscribe",12);
   await cron(e,"2026-11-07T06:30:00.000Z");
-  let sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 قیمت‌ها"));
+  let sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📡 رصدینو | نبض بازار"));
   assert.deepEqual(sends.map(x=>String(x.payload.chat_id)).sort(),["4001","4002"]);
   await cron(e,"2026-11-07T06:30:00.000Z");
-  sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 قیمت‌ها"));
+  sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📡 رصدینو | نبض بازار"));
   assert.equal(sends.length,2);
   await message(e,4001,"/stop",13);
   await cron(e,"2026-11-07T18:30:00.000Z");
-  sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 قیمت‌ها"));
+  sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📡 رصدینو | نبض بازار"));
   assert.deepEqual(sends.map(x=>String(x.payload.chat_id)).sort(),["4001","4002","4002"]);
 });
 test("KV list paging covers more than 1000 opted-in users", async () => {
