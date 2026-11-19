@@ -48,7 +48,7 @@ function isCC0(ext) {
   const short=String(ext?.LicenseShortName?.value??"").toLowerCase().trim();
   const url=String(ext?.LicenseUrl?.value??"");
   return /^cc0(?:\s*1\.0)?$/i.test(short)
-    && /^https?:\/\/creativecommons\.org\/publicdomain\/zero\/1\.0\/?$/i.test(url);
+    && /^https?:\/\/creativecommons\.org\/publicdomain\/zero\/1\.0(?:\/deed\.[a-z-]+)?\/?$/i.test(url);
 }
 function safeCommonsAudio(raw) {
   if (typeof raw !== "string" || raw.length>2000) return null;
@@ -75,7 +75,7 @@ export function normalizeCommonsFile(page) {
 async function commonsSearch(query,fetcher) {
   const u=new URL(COMMONS_API);
   for(const [key,value] of Object.entries({
-    action:"query",generator:"search",gsrsearch:query,gsrnamespace:"6",
+    action:"query",generator:"search",gsrsearch:"filetype:audio filemime:audio/mpeg "+query,gsrnamespace:"6",
     gsrlimit:"25",prop:"imageinfo",iiprop:"url|size|mime|extmetadata",
     format:"json",formatversion:"2"
   }))u.searchParams.set(key,value);
@@ -98,12 +98,10 @@ export async function findAudioFiles(query,{fetcher=globalThis.fetch}={}) {
   try {
     files=await commonsSearch(clean,fetcher);
     ok=true;
-    // Fallback to a distinctive word for user typos / missing artist titles.
+    // CirrusSearch fuzzy suffix tolerates one typo; never guess outside actual results.
     if(!files.length) {
-      const terms=NORMALIZE(clean).split(" ").filter(s=>s.length>=4);
-      const term=terms.sort((a,b)=>b.length-a.length)[0];
-      if(term && term!==NORMALIZE(clean))
-        files=await commonsSearch(term,fetcher);
+      const fuzzy=NORMALIZE(clean).split(" ").map(t=>t.length>=4?t+"~1":t).join(" ");
+      if(fuzzy!==NORMALIZE(clean))files=await commonsSearch(fuzzy,fetcher);
     }
   }catch {
     if(!ok)return {status:"unavailable",files:[]};
@@ -140,6 +138,9 @@ export function audioChoicesView(files) {
   };
 }
 // Auto-send only if title has a strong, unambiguous match; otherwise ask.
-export const confidentAudioMatch = files =>
-  files.length===1 && files[0].score>=0.86 ||
-  files.length>1 && files[0].score>=0.96 && files[0].score-files[1].score>=0.22;
+export const confidentAudioMatch = (files,query="") => {
+  const words=NORMALIZE(query).split(" ").filter(Boolean);
+  if(words.length===1 && NORMALIZE(files[0]?.title)!==words[0])return false;
+  return files.length===1 && files[0].score>=0.86 ||
+    files.length>1 && files[0].score>=0.96 && files[0].score-files[1].score>=0.22;
+};
