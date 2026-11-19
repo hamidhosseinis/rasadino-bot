@@ -1,0 +1,26 @@
+name: Private YouTube downloader checks
+on:
+  push:
+    paths:
+      - "services/youtube-downloader/**"
+      - ".github/workflows/youtube-downloader-check.yml"
+  pull_request:
+    paths:
+      - "services/youtube-downloader/**"
+      - ".github/workflows/youtube-downloader-check.yml"
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install downloader and test dependencies
+        run: pip install -r services/youtube-downloader/requirements.txt pytest httpx
+      - name: Compile Python
+        run: python -m py_compile services/youtube-downloader/app.py
+      - name: Run API and authorization tests
+        run: cd services/youtube-downloader && python -m pytest -q test_app.py
