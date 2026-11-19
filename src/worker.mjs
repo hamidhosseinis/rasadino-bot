@@ -1,7 +1,6 @@
 
-import {musicMenuView} from "./music/menus.mjs";
-import {validateMusicQuery, checkMusicSearchRate, searchMusic, renderMusicSearch} from "./music/search.mjs";
-import {recommendMusic, renderRecommendations, validRecommendationSelection} from "./music/recommendations.mjs";
+import {checkMusicSearchRate} from "./music/search.mjs";
+import {validAudioQuery,findAudioFiles,audioHomeView,audioRetryView,audioChoicesView,confidentAudioMatch} from "./music/audio.mjs";
 
 const TIMEZONE = "Asia/Tehran";
 const GOLD_URL = "https://www.tgju.org/profile/geram18";
@@ -353,26 +352,73 @@ async function deliverScheduledReport(env, chatId, owner, slot, message) {
 
 
 const MUSIC_PENDING_PREFIX = "music:pending:";
+const MUSIC_CHOICES_PREFIX = "music:choices:";
 async function clearPendingMusic(env,chatId) {
-  const key=MUSIC_PENDING_PREFIX+chatId;
-  if (await env.STATE.get(key)) await env.STATE.delete(key);
+  for(const key of [MUSIC_PENDING_PREFIX+chatId,MUSIC_CHOICES_PREFIX+chatId]) {
+    if(await env.STATE.get(key))await env.STATE.delete(key);
+  }
 }
-async function performMusicSearch(env,chatId,language,query) {
-  if (!validateMusicQuery(language,query)) {
-    const page=renderMusicSearch({status:"invalid"},language);
+async function musicFilePrompt(env,chatId,messageId=null) {
+  await clearPendingMusic(env,chatId);
+  await env.STATE.put(MUSIC_PENDING_PREFIX+chatId,"file",{expirationTtl:300});
+  const page=audioHomeView();
+  return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+}
+async function sendLicensedAudio(env,chatId,file) {
+  // Trust no external URLs from callback state: provider metadata must be CC0 and a bounded MP3.
+  if(file?.license!=="CC0" || !/^https:\/\/upload\.wikimedia\.org\/[^?#]+\.mp3$/i.test(file.url??"")
+    || !Number.isFinite(file.bytes) || file.bytes>20*1024*1024 || file.bytes<100000)
+    throw new Error("Invalid licensed audio");
+  const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(file.url));
+  const key="music:fileid:v1:"+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");
+  let fileId=null;
+  try{fileId=await env.STATE.get(key);}catch{}
+  const payload={chat_id:chatId,audio:fileId||file.url,title:file.title.slice(0,100),
+    caption:"🎧 "+file.title.slice(0,120)+"\nمجوز بازنشر: CC0"};
+  let result;
+  try{result=await telegram(env,"sendAudio",payload);}
+  catch(e){
+    if(!fileId)throw e;
+    result=await telegram(env,"sendAudio",{...payload,audio:file.url});
+  }
+  if(result?.audio?.file_id) {
+    try{await env.STATE.put(key,result.audio.file_id,{expirationTtl:604800});}catch{}
+  }
+  return result;
+}
+async function performMusicFileSearch(env,chatId,query) {
+  await env.STATE.put(MUSIC_PENDING_PREFIX+chatId,"file",{expirationTtl:300});
+  if(!validAudioQuery(query)) {
+    const page=audioRetryView("⚠️ نام آهنگ رو در ۲ تا ۸۰ نویسه بفرست.");
     return send(env,chatId,page.text,page.keyboard);
   }
   try {
-    if (!await checkMusicSearchRate(env,chatId)) {
-      const page=musicMenuView("music:search:"+language);
-      return send(env,chatId,"⏳ برای جلوگیری از درخواست‌های تکراری، چند ثانیه بعد دوباره جست‌وجو کن.",page.keyboard);
+    if(!await checkMusicSearchRate(env,chatId)){
+      const page=audioRetryView("⏳ چند ثانیه دیگه دوباره امتحان کن.");
+      return send(env,chatId,page.text,page.keyboard);
     }
-    const result=await searchMusic(env,{language,query});
-    const page=renderMusicSearch(result,language);
+    const result=await findAudioFiles(query);
+    if(result.status==="unavailable"){
+      const page=audioRetryView("⚠️ جستجوی فایل فعلاً در دسترس نیست؛ دوباره امتحان کن.");
+      return send(env,chatId,page.text,page.keyboard);
+    }
+    if(result.status!=="ok"){
+      const page=audioRetryView("🔎 فایل مجاز این آهنگ پیدا نشد.\nنام خواننده یا بخشی از عنوان رو دقیق‌تر بفرست.");
+      return send(env,chatId,page.text,page.keyboard);
+    }
+    if(confidentAudioMatch(result.files,query)){
+      try{return await sendLicensedAudio(env,chatId,result.files[0]);}
+      catch{
+        const page=audioRetryView("⚠️ فایل پیدا شد ولی ارسالش ممکن نبود؛ آهنگ دیگری امتحان کن.");
+        return send(env,chatId,page.text,page.keyboard);
+      }
+    }
+    await env.STATE.put(MUSIC_CHOICES_PREFIX+chatId,JSON.stringify(result.files),{expirationTtl:300});
+    const page=audioChoicesView(result.files);
     return send(env,chatId,page.text,page.keyboard);
-  } catch {
-    console.log("Music metadata search failed (details withheld)");
-    const page=renderMusicSearch({status:"unavailable"},language);
+  }catch{
+    console.log("Music file search failed (details withheld)");
+    const page=audioRetryView("⚠️ جستجو فعلاً ممکن نیست؛ کمی بعد دوباره امتحان کن.");
     return send(env,chatId,page.text,page.keyboard);
   }
 }
@@ -400,45 +446,29 @@ async function onCallbackQuery(query,env) {
       "✅ منو بسته شد | بازکردن: /menu",
       {inline_keyboard:[]},messageId);
   }
-  if(/^music:preview:/.test(action)){
-    const selection=action.split(":");
-    const [language,genre,mode,countText]=selection.slice(2);
-    const count=Number(countText);
-    if(selection.length!==6 || String(count)!==countText ||
-      !validRecommendationSelection({language,genre,mode,count})){
-      const page=musicMenuView();
-      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
-    }
-    await clearPendingMusic(env,chatId);
-    if(mode!=="today" && !(language==="fa" && ["week","classic","hidden"].includes(mode))){
-      try {
-        if(!await checkMusicSearchRate(env,chatId)){
-          return renderMenu(env,chatId,"⏳ لطفاً چند ثانیه بعد دوباره درخواست بده.",
-            musicMenuView("music:type:"+language+":"+genre+":"+mode).keyboard,messageId);
-        }
+  if(action.startsWith("music:")){
+    if(/^music:pick:[0-2]$/.test(action)){
+      const raw=await env.STATE.get(MUSIC_CHOICES_PREFIX+chatId);
+      let files;
+      try{files=JSON.parse(raw);}catch{}
+      const file=Array.isArray(files)?files[Number(action.slice(-1))]:null;
+      if(!file){
+        const page=audioRetryView("⌛ انتخاب منقضی شده؛ نام آهنگ رو دوباره بفرست.");
+        return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+      }
+      await env.STATE.delete(MUSIC_CHOICES_PREFIX+chatId);
+      try{
+        await sendLicensedAudio(env,chatId,file);
+        await env.STATE.put(MUSIC_PENDING_PREFIX+chatId,"file",{expirationTtl:300});
+        return renderMenu(env,chatId,"✅ فایل ارسال شد. آهنگ بعدی؟",
+          audioHomeView().keyboard,messageId);
       }catch{
-        return renderMenu(env,chatId,"⚠️ محدودکننده درخواست موقتاً در دسترس نیست؛ بعداً دوباره امتحان کن.",
-          musicMenuView("music:type:"+language+":"+genre+":"+mode).keyboard,messageId);
+        const page=audioRetryView("⚠️ ارسال این فایل ممکن نبود؛ آهنگ دیگری انتخاب کن.");
+        return renderMenu(env,chatId,page.text,page.keyboard,messageId);
       }
     }
-    try{
-      const result=await recommendMusic(env,{language,genre,mode,count});
-      const page=renderRecommendations(result);
-      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
-    }catch{
-      console.log("Music recommendation failed (details withheld)");
-      const page=renderRecommendations({status:"unavailable",language,genre,mode,count,tracks:[]});
-      return renderMenu(env,chatId,page.text,page.keyboard,messageId);
-    }
-  }
-  if(action.startsWith("music:")){
-    const page=musicMenuView(action) ?? musicMenuView();
-    if(/^music:search:(fa|us)$/.test(action)) {
-      await env.STATE.put(MUSIC_PENDING_PREFIX+chatId,action.slice(-2),{expirationTtl:300});
-    } else {
-      await clearPendingMusic(env,chatId);
-    }
-    return renderMenu(env,chatId,page.text,page.keyboard,messageId);
+    // Old music menus must not reveal links or rank suggestions after file-only migration.
+    return musicFilePrompt(env,chatId,messageId);
   }
   if(action==="price:menu")return showPriceMenu(env,chatId,messageId);
   if(["price:btc","price:usd","price:oil","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
@@ -1278,16 +1308,12 @@ async function onTelegram(update, env) {
     return send(env,chatId,sourcesMessage(),simpleBackKeyboard());
   if(cmd==="/news" || line==="📰 اخبار")
     return sendGolestanNews(env,chatId,true,0);
-  if(cmd==="/music" || line==="🎧 رصد موزیک"){
-    await clearPendingMusic(env,chatId);
-    const page=musicMenuView();
-    return send(env,chatId,page.text,page.keyboard);
-  }
+  if(cmd==="/music" || line==="🎧 رصد موزیک")return musicFilePrompt(env,chatId);
   if(cmd==="/findmusic"){
-    await clearPendingMusic(env,chatId);
-    const matched=line.match(/^\/findmusic(?:@[a-zA-Z0-9_]+)?\s+(fa|us)\s+(.+)$/i);
-    const language=matched?.[1]?.toLowerCase() || "fa";
-    return performMusicSearch(env,chatId,language,matched?.[2] || "");
+    const query=line.replace(/^\/findmusic(?:@[a-zA-Z0-9_]+)?(?:\s+(?:fa|us))?\s*/i,"");
+    return query && query!==line
+      ?performMusicFileSearch(env,chatId,query)
+      :musicFilePrompt(env,chatId);
   }
   if(cmd==="/support" || line==="💬 پشتیبان")
     return showSupport(env,chatId);
@@ -1303,7 +1329,7 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 موزیک /music | جست‌وجو /findmusic fa نام آهنگ\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
+      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 دریافت فایل موزیک /music | /findmusic نام آهنگ\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
@@ -1311,9 +1337,8 @@ async function onTelegram(update, env) {
   }
   if (!line.startsWith("/")) {
     const pending=await env.STATE.get(MUSIC_PENDING_PREFIX+chatId);
-    if (pending==="fa" || pending==="us") {
-      await env.STATE.delete(MUSIC_PENDING_PREFIX+chatId);
-      return performMusicSearch(env,chatId,pending,line);
+    if (pending==="file" || pending==="fa" || pending==="us") {
+      return performMusicFileSearch(env,chatId,line);
     }
   }
   return showMainMenu(env,chatId,null,"👇 انتخاب کن:");

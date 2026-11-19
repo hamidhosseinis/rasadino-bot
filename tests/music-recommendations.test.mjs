@@ -154,23 +154,16 @@ test("two provider errors mean unavailable; partial failure is transparently lab
   assert.match(renderRecommendations(r).text,/اطلاعات به دلیل خطای برخی منابع/);
 });
 
-test("full interactive Worker menu returns ranked source results without extra Telegram messages",async t=>{
+test("old recommendation callback redirects to file-only search without showing any links",async t=>{
   const KV=fakeKV(),env={STATE:KV,BOT_TOKEN:"FAKE_STAGE6_BOT",WEBHOOK_SECRET:"FAKE_STAGE6_SECRET"};
   const old=globalThis.fetch,telegramCalls=[];
   globalThis.fetch=async(url,opts={})=>{
     const u=new URL(String(url));
-    if(u.hostname==="api.telegram.org"){
-      telegramCalls.push({method:u.pathname.split("/").at(-1),data:JSON.parse(opts.body)});
-      return {ok:true,status:200,json:async()=>({ok:true,result:true})};
-    }
-    if(u.hostname==="api.audius.co"){
-      return {ok:true,status:200,headers:{get:()=>null},json:async()=>({data:[
-        audius("r123","Weekly Song","Weekly Singer")
-      ]})};
-    }
-    throw Error("Unexpected host "+u.hostname);
+    assert.equal(u.hostname,"api.telegram.org");
+    telegramCalls.push({method:u.pathname.split("/").at(-1),data:JSON.parse(opts.body)});
+    return {ok:true,status:200,json:async()=>({ok:true,result:true})};
   };
-  t.after(()=>{globalThis.fetch=old});
+  t.after(()=>{globalThis.fetch=old;});
   const update={update_id:45001,callback_query:{id:"recommend-stage6",
     data:"music:preview:us:pop:week:5",from:{id:99101},
     message:{message_id:51,chat:{id:99101,type:"private"}}}};
@@ -182,8 +175,8 @@ test("full interactive Worker menu returns ranked source results without extra T
   assert.equal(res.status,200);
   const edited=telegramCalls.filter(x=>x.method==="editMessageText");
   assert.equal(edited.length,1);
-  assert.match(edited[0].data.text,/Weekly Song/);
+  assert.match(edited[0].data.text,/نام آهنگ یا خواننده/);
   assert.equal(telegramCalls.filter(x=>x.method==="sendAudio").length,0);
   assert.equal(JSON.parse(await KV.get("user:99101")).notifications_enabled,false);
-  assert.ok(KV.map.has("music:recommend:v1:us:pop:week"));
+  assert.equal(await KV.get("music:pending:99101"),"file");
 });

@@ -19,6 +19,7 @@ function fakeEnv() {
       values.set(key, value);
       metadata.set(key, options.metadata ?? null);
     },
+    async delete(key) {values.delete(key);metadata.delete(key);},
     async list({prefix="",limit=1000,cursor}={}) {
       const keys = [...values.keys()].filter(x => x.startsWith(prefix)).sort();
       const offset = Number(cursor ?? 0);
@@ -151,31 +152,31 @@ test("all callbacks are Telegram-safe (<64 bytes) and reject forged selections",
   ]) assert.equal(musicMenuView(bad), null,bad);
 });
 
-test("real Worker routes /music and inline callbacks using only fake Telegram and KV", async t => {
-  const calls=stubTelegram(t);
-  const env=fakeEnv();
+
+test("real Worker routes /music to file-only prompt; legacy buttons cannot show links",async t=>{
+  const calls=stubTelegram(t),env=fakeEnv();
   assert.equal((await update(env,message(77601,"/music",10001))).status,200);
-  matchAction({keyboard:last(calls,"sendMessage").reply_markup}, "music:lang:fa");
+  assert.match(last(calls,"sendMessage").text,/نام آهنگ یا خواننده/);
+  matchAction({keyboard:last(calls,"sendMessage").reply_markup},"music:home");
+  assert.equal(await env.STATE.get("music:pending:77601"),"file");
   const flow=["music:lang:fa","music:genre:fa:rock","music:type:fa:rock:smart",
-    "music:preview:fa:rock:smart:5","music:type:fa:rock:smart",
-    "music:genre:fa:rock","music:lang:fa","music:home","main:menu","menu:close"];
+    "music:preview:fa:rock:smart:5","music:home"];
   for(let i=0;i<flow.length;i++){
     assert.equal((await update(env,callback(77601,flow[i],10002+i))).status,200);
-    assert.equal(last(calls,"editMessageText").message_id,45);
+    assert.match(last(calls,"editMessageText").text,/نام آهنگ یا خواننده/);
     assert.equal(last(calls,"answerCallbackQuery").callback_query_id,"music-test-"+(10002+i));
   }
-  assert.match(last(calls,"editMessageText").text,/منو بسته شد/);
-  const user=JSON.parse(await env.STATE.get("user:77601"));
-  assert.equal(user.notifications_enabled,false);
-  assert.equal([...env.STATE.values.keys()].filter(x=>x.startsWith("music:user:") || x.startsWith("music:pending:")).length,0);
-  assert.ok([...env.STATE.values.keys()].some(x=>x.startsWith("music:recommend:v1:")));
-  assert.equal(calls.filter(x=>x.method==="sendMessage").length,1);
+  assert.equal((await update(env,callback(77601,"main:menu",10010))).status,200);
+  assert.equal(await env.STATE.get("music:pending:77601"),null);
+  assert.equal(JSON.stringify(calls).includes("https://music.apple.com"),false);
+  assert.equal(calls.filter(x=>x.method==="sendAudio").length,0);
 });
 
-test("invalid music callbacks safely return home; other users cannot hijack menus",async t=>{
+
+test("invalid music callbacks open file-only prompt; other users cannot hijack",async t=>{
   const calls=stubTelegram(t),env=fakeEnv();
   assert.equal((await update(env,callback(77701,"music:genre:__proto__:pop",11001))).status,200);
-  assert.match(last(calls,"editMessageText").text,/زبان موسیقی را انتخاب کن/);
+  assert.match(last(calls,"editMessageText").text,/نام آهنگ یا خواننده/);
   const count=calls.filter(x=>x.method==="editMessageText").length;
   assert.equal((await update(env,callback(77701,"music:lang:fa",11002,77702))).status,200);
   assert.equal(last(calls,"answerCallbackQuery").show_alert,true);
