@@ -174,105 +174,96 @@ test("search screen is accessible from both languages with navigation to prior m
   assert.equal(musicMenuView("music:search:xx"),null);
 });
 
-test("real Worker handles /findmusic with two mocked providers and safe official buttons",async t=>{
-  const state=fakeState(),env={
-    STATE:state,BOT_TOKEN:"FAKE_MUSIC_TOKEN",WEBHOOK_SECRET:"FAKE_MUSIC_WEBHOOK"
-  };
-  const original=globalThis.fetch;
-  const calls=[];
-  globalThis.fetch=async (url,opts={})=>{
+
+test("real Worker handles legacy /findmusic with file-only result",async t=>{
+  const state=fakeState(),env={STATE:state,BOT_TOKEN:"FAKE_MUSIC_TOKEN",WEBHOOK_SECRET:"FAKE_MUSIC_WEBHOOK"};
+  const original=globalThis.fetch,calls=[];
+  globalThis.fetch=async(url,opts={})=>{
     const u=new URL(String(url));
     if(u.hostname==="api.telegram.org"){
       const method=u.pathname.split("/").at(-1);
-      const payload=JSON.parse(opts.body);
-      calls.push({method,payload});
-      return response({ok:true,result:true});
+      calls.push({method,payload:JSON.parse(opts.body)});
+      return response({ok:true,result:{audio:{file_id:"FAKE_AUDIO"}}});
     }
-    if(u.hostname==="itunes.apple.com")return response({resultCount:1,results:[itunesTrack()]});
-    if(u.hostname==="api.audius.co")return response({data:[]});
+    if(u.hostname==="commons.wikimedia.org")return response({query:{pages:[{
+      title:"File:Hello.mp3",imageinfo:[{url:"https://upload.wikimedia.org/wikipedia/commons/1/11/Hello.mp3",
+        size:800000,mime:"audio/mpeg",extmetadata:{
+          LicenseShortName:{value:"CC0"},LicenseUrl:{value:"https://creativecommons.org/publicdomain/zero/1.0/"}
+        }}]
+    }]}});
     throw Error("Unexpected host "+u.hostname);
   };
   t.after(()=>{globalThis.fetch=original;});
   const update={update_id:83791,message:{chat:{id:4901,type:"private"},from:{id:4901},text:"/findmusic us Hello"}};
   const resp=await worker.fetch(new Request("https://example.invalid/telegram",{
-    method:"POST",
-    headers:{"Content-Type":"application/json","X-Telegram-Bot-Api-Secret-Token":env.WEBHOOK_SECRET},
+    method:"POST",headers:{"Content-Type":"application/json","X-Telegram-Bot-Api-Secret-Token":env.WEBHOOK_SECRET},
     body:JSON.stringify(update)
   }),env);
   assert.equal(resp.status,200);
-  const sent=calls.filter(x=>x.method==="sendMessage");
-  assert.equal(sent.length,1);
-  assert.match(sent[0].payload.text,/Hello/);
-  assert.ok(sent[0].payload.reply_markup.inline_keyboard.some(row=>row.some(b=>b.url==="https://music.apple.com/us/album/hello/123?i=123")));
+  assert.equal(calls.filter(x=>x.method==="sendAudio").length,1);
+  assert.equal(calls.filter(x=>x.method==="sendMessage").length,0);
   assert.equal(JSON.parse(await state.get("user:4901")).notifications_enabled,false);
-  assert.equal([...state.data.keys()].some(k=>k.startsWith("music:user:")),false);
-  assert.equal(calls.filter(c=>c.method==="sendAudio").length,0);
 });
 
-test("forged group request or invalid input cannot trigger metadata provider calls",async t=>{
+
+test("group request and invalid music name cannot trigger external provider calls",async t=>{
   const state=fakeState(),env={STATE:state,BOT_TOKEN:"FAKE_MUSIC_TOKEN",WEBHOOK_SECRET:"FAKE_MUSIC_WEBHOOK"};
-  const old=globalThis.fetch;
-  const calls=[];
+  const old=globalThis.fetch,calls=[];
   globalThis.fetch=async(url,opts)=>{
     const u=new URL(String(url));
     assert.equal(u.hostname,"api.telegram.org");
-    calls.push({url:String(url),opts});
+    calls.push(JSON.parse(opts.body));
     return response({ok:true,result:true});
   };
   t.after(()=>{globalThis.fetch=old;});
-  const send=async(update)=>worker.fetch(new Request("https://example.invalid/telegram",{
-    method:"POST",
-    headers:{"Content-Type":"application/json","X-Telegram-Bot-Api-Secret-Token":env.WEBHOOK_SECRET},
+  const send=update=>worker.fetch(new Request("https://example.invalid/telegram",{
+    method:"POST",headers:{"Content-Type":"application/json","X-Telegram-Bot-Api-Secret-Token":env.WEBHOOK_SECRET},
     body:JSON.stringify(update)
   }),env);
-  assert.equal((await send({update_id:1001,message:{chat:{id:-10022,type:"supergroup"},text:"/findmusic us Hello"}})).status,200);
+  assert.equal((await send({update_id:1001,message:{chat:{id:-10022,type:"supergroup"},text:"/findmusic Hello"}})).status,200);
   assert.equal(calls.length,0);
-  assert.equal((await send({update_id:1002,message:{chat:{id:77202,type:"private"},from:{id:77202},text:"/findmusic xx blah"}})).status,200);
+  assert.equal((await send({update_id:1002,message:{chat:{id:77202,type:"private"},from:{id:77202},text:"/findmusic !!"}})).status,200);
   assert.equal(calls.length,1);
-  assert.match(JSON.parse(calls[0].opts.body).text,/دستور نامعتبر/);
+  assert.match(calls[0].text,/۲ تا ۸۰/);
 });
 
-test("language-specific search callback accepts the next plain message and clears temporary state",async t=>{
+
+test("legacy search callback now accepts next plain text but never returns media links",async t=>{
   const STATE=fakeState(),env={STATE,BOT_TOKEN:"FAKE_MUSIC_TOKEN",WEBHOOK_SECRET:"FAKE_MUSIC_WEBHOOK"};
-  const original=globalThis.fetch;
-  const calls=[];
+  const original=globalThis.fetch,calls=[];
   globalThis.fetch=async(url,options={})=>{
     const u=new URL(String(url));
     if(u.hostname==="api.telegram.org"){
       calls.push({method:u.pathname.split("/").at(-1),payload:JSON.parse(options.body)});
       return response({ok:true,result:true});
     }
-    if(u.hostname==="itunes.apple.com")return response({resultCount:1,results:[itunesTrack(22,"Koocheh","Googoosh")]});
-    if(u.hostname==="api.audius.co")return response({data:[]});
-    throw Error("Unexpected network request");
+    if(u.hostname==="commons.wikimedia.org")return response({query:{pages:[]}});
+    throw Error("Unexpected network request "+u.hostname);
   };
   t.after(()=>{globalThis.fetch=original});
-  const deliver=(update)=>worker.fetch(new Request("https://example.invalid/telegram",{
-    method:"POST",
-    headers:{"Content-Type":"application/json","X-Telegram-Bot-Api-Secret-Token":env.WEBHOOK_SECRET},
+  const deliver=update=>worker.fetch(new Request("https://example.invalid/telegram",{
+    method:"POST",headers:{"Content-Type":"application/json","X-Telegram-Bot-Api-Secret-Token":env.WEBHOOK_SECRET},
     body:JSON.stringify(update)
   }),env);
   const cb={update_id:20100,callback_query:{id:"pending-20100",data:"music:search:fa",
     from:{id:55112},message:{message_id:55,chat:{id:55112,type:"private"}}}};
   assert.equal((await deliver(cb)).status,200);
-  assert.equal(STATE.data.get("music:pending:55112"),"fa");
+  assert.equal(STATE.data.get("music:pending:55112"),"file");
   assert.equal(STATE.operations.find(x=>x.key==="music:pending:55112"&&x.action==="put").opts.expirationTtl,300);
-  const prompt=calls.filter(x=>x.method==="editMessageText").at(-1).payload.text;
-  assert.match(prompt,/نام آهنگ یا خواننده را در پیام بعدی بفرست/);
   assert.equal((await deliver({update_id:20101,message:{chat:{id:55112,type:"private"},
     from:{id:55112},text:"Googoosh"}})).status,200);
-  assert.equal(STATE.data.has("music:pending:55112"),false);
+  assert.equal(STATE.data.get("music:pending:55112"),"file");
   const sent=calls.filter(x=>x.method==="sendMessage");
   assert.equal(sent.length,1);
-  assert.match(sent[0].payload.text,/Koocheh/);
-  assert.equal(STATE.data.has("music:user:55112"),false);
+  assert.match(sent[0].payload.text,/پیدا نشد/);
+  assert.equal(JSON.stringify(sent).includes("https://"),false);
   assert.equal(calls.filter(x=>x.method==="sendAudio").length,0);
 });
 
-test("leaving music search cancels the pending free-text mode",async t=>{
+
+test("main menu cancels free-text music requests",async t=>{
   const STATE=fakeState(),env={STATE,BOT_TOKEN:"FAKE_MUSIC_TOKEN",WEBHOOK_SECRET:"FAKE_MUSIC_WEBHOOK"};
-  const original=globalThis.fetch;
-  const calls=[];
+  const original=globalThis.fetch,calls=[];
   globalThis.fetch=async(url,opts)=>{
     assert.ok(String(url).startsWith("https://api.telegram.org/"));
     calls.push({url:String(url),payload:JSON.parse(opts.body)});
@@ -286,11 +277,11 @@ test("leaving music search cancels the pending free-text mode",async t=>{
   const cb=(update_id,data)=>({update_id,callback_query:{id:"cb-"+update_id,data,
     from:{id:66101},message:{message_id:23,chat:{id:66101,type:"private"}}}});
   await deliver(cb(30200,"music:search:us"));
-  assert.equal(STATE.data.get("music:pending:66101"),"us");
-  await deliver(cb(30201,"music:home"));
+  assert.equal(STATE.data.get("music:pending:66101"),"file");
+  await deliver(cb(30201,"main:menu"));
   assert.equal(STATE.data.has("music:pending:66101"),false);
   await deliver({update_id:30202,message:{chat:{id:66101,type:"private"},
-    from:{id:66101},text:"Hello"}}); // without an active search, open the main menu.
+    from:{id:66101},text:"Hello"}});
   assert.match(calls.at(-1).payload.text,/خوش آمدی/);
 });
 
