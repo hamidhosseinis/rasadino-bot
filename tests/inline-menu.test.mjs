@@ -123,6 +123,8 @@ test("all price options display only chosen asset or full report; refresh uses p
     ["price:refresh",404,"نبض بازار"]]){
     assert.equal((await deliver(e,callback(994,data,n))).status,200,data);
     assert.match(last(calls,"editMessageText").text,new RegExp(keyword));
+    assert.equal(last(calls,"editMessageText").parse_mode,"HTML");
+    assert.match(last(calls,"editMessageText").text,/📡 رصدینو \| نبض بازار/);
     assert.ok(last(calls,"editMessageText").reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="price:menu"));
   }
   assert.ok(external.some(s=>s.includes("coingecko")));
