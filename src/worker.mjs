@@ -63,25 +63,28 @@ function priceMenuKeyboard() {
 }
 function priceResultKeyboard() {
   return {inline_keyboard:[
-    [{text:"🔄 تازه‌سازی",callback_data:"price:refresh"}],
+    [{text:"📚 منابع و محاسبات",callback_data:"price:sources"},
+      {text:"🔄 به‌روزرسانی",callback_data:"price:refresh"}],
     [{text:"💰 انتخاب قیمت دیگر",callback_data:"price:menu"}],
     ...BACK_CLOSE
   ]};
 }
 function simpleBackKeyboard() {return {inline_keyboard:BACK_CLOSE};}
-async function send(env, chatId, text, replyMarkup = null) {
+async function send(env, chatId, text, replyMarkup = null, parseMode = null) {
   return telegram(env,"sendMessage",{
     chat_id:chatId,text,disable_web_page_preview:true,
-    ...(replyMarkup ? {reply_markup:replyMarkup} : {})
+    ...(replyMarkup ? {reply_markup:replyMarkup} : {}),
+    ...(parseMode ? {parse_mode:parseMode} : {})
   });
 }
 // Navigating an inline menu edits the original message instead of spamming the chat.
-async function renderMenu(env, chatId, text, replyMarkup, messageId = null) {
+async function renderMenu(env, chatId, text, replyMarkup, messageId = null, parseMode = null) {
   if(messageId) {
     try {
       return await telegram(env,"editMessageText",{
         chat_id:chatId,message_id:messageId,text,disable_web_page_preview:true,
-        reply_markup:replyMarkup
+        reply_markup:replyMarkup,
+        ...(parseMode ? {parse_mode:parseMode} : {})
       });
     } catch(e) {
       if(/message is not modified/i.test(String(e.message)))return null;
@@ -89,7 +92,7 @@ async function renderMenu(env, chatId, text, replyMarkup, messageId = null) {
       console.log("Inline message edit failed; sending a new menu");
     }
   }
-  return send(env,chatId,text,replyMarkup);
+  return send(env,chatId,text,replyMarkup,parseMode);
 }
 async function removeLegacyKeyboardOnce(env,chatId) {
   const user=await readUser(env,chatId);
@@ -105,7 +108,7 @@ async function removeLegacyKeyboardOnce(env,chatId) {
 }
 
 function priceViewText(pr,asset="all") {
-  if (asset==="all") return report(pr);
+  if (asset==="all") return report(pr,"html");
   const selected={btc:pr.btc,oil:pr.oil,usdt:pr.usdt,gold:pr.gold};
   const item=selected[asset];
   const when=item?.updatedAt ? new Intl.DateTimeFormat("fa-IR",{
@@ -328,7 +331,7 @@ async function deliverScheduledReport(env, chatId, owner, slot, message) {
   const legacyKey = "sent:" + slot;
   if (chatId === owner && await env.STATE.get(legacyKey)) return false;
   try {
-    await send(env, chatId, message);
+    await send(env, chatId, message, priceResultKeyboard(), "HTML");
     await env.STATE.put(key, "1", {expirationTtl: 172800});
     if (chatId === owner) {
       await env.STATE.put(legacyKey, "1", {expirationTtl: 172800});
@@ -437,8 +440,15 @@ async function onCallbackQuery(query,env) {
   if(action==="price:menu")return showPriceMenu(env,chatId,messageId);
   if(["price:btc","price:usd","price:oil","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
     const asset=action==="price:refresh"?"all":(action==="price:usd"?"oil":action.slice(6));
-    return renderMenu(env,chatId,priceViewText(await prices(env),asset),priceResultKeyboard(),messageId);
+    return renderMenu(env,chatId,priceViewText(await prices(env),asset),priceResultKeyboard(),
+      messageId,asset==="all"?"HTML":null);
   }
+  if(action==="price:sources")return renderMenu(env,chatId,sourcesMessage(),{
+    inline_keyboard:[
+      [{text:"⬅️ بازگشت به قیمت‌ها",callback_data:"price:all"}],
+      ...BACK_CLOSE
+    ]
+  },messageId);
   if(action==="sources:show"){
     return renderMenu(env,chatId,sourcesMessage(),simpleBackKeyboard(),messageId);
   }
@@ -1140,17 +1150,64 @@ function priceLine(item,asset) {
   return data.title+": "+money(item,data.currency)+" | "+growthText(item,data.baseline)+
     " ("+data.note+")"+marketInfo;
 }
-function report(pr) {
-  const date=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
-    timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
-  }).format(new Date(pr.at));
+function persianDateTime(value) {
+  const date=new Date(value);
+  if(!Number.isFinite(date.getTime()))return "نامشخص";
+  const day=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
+    timeZone:TIMEZONE,day:"numeric",month:"long",year:"numeric"
+  }).format(date);
+  const time=new Intl.DateTimeFormat("fa-IR",{
+    timeZone:TIMEZONE,hour:"2-digit",minute:"2-digit",hour12:false
+  }).format(date);
+  return day+" • ساعت "+time;
+}
+function marketPriceBlock(item,asset,format="text") {
+  const profiles={
+    btc:{name:"₿ بیت‌کوین | BTC",base:HISTORICAL_BTC_USD,unit:"دلار",
+      origin:"نخستین نرخ دلاری در سال ۲۰۰۹"},
+    oil:{name:"🛢 نفت خام برنت | BRENT",base:HISTORICAL_OIL_USD,unit:"دلار / بشکه",
+      origin:"نفت مرجع سال ۱۳۵۷ (۱۲٫۶۶ دلار؛ شاخص متفاوت)"},
+    usdt:{name:"💲 تتر | USDT",base:HISTORICAL_USD_TOMAN,unit:"تومان",
+      origin:"دلار سال ۱۳۵۷ (تتر آن زمان وجود نداشت)"},
+    gold:{name:"🥇 طلای ۱۸ عیار | GOLD",base:HISTORICAL_GOLD18_TOMAN,unit:"تومان / گرم",
+      origin:"برآورد طلای ۱۸ عیار در سال ۱۳۵۷ (حدود ۳۰ تومان)"}
+  };
+  const profile=profiles[asset];
+  if(!profile)return "قیمت نامشخص";
+  if(!validPriceQuote(item))return profile.name+"\n⚠️ نرخ معتبر در دسترس نیست";
+  const amount=new Intl.NumberFormat("fa-IR",{
+    maximumFractionDigits:asset==="btc"||asset==="oil"?2:0
+  }).format(item.value)+" "+profile.unit;
+  const price=format==="html"?"<b>"+amount+"</b>":amount;
+  const lines=[profile.name,price,"📈 رشد تاریخی: "+growthText(item,profile.base),
+    "مبدأ مقایسه: "+profile.origin];
+  if(asset==="oil"&&item.marketDate&&/^\d{4}-\d{2}-\d{2}$/.test(item.marketDate)){
+    const date=new Date(item.marketDate+"T00:00:00Z");
+    if(Number.isFinite(date.getTime())){
+      const label=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
+        timeZone:"UTC",day:"numeric",month:"long",year:"numeric"
+      }).format(date);
+      lines.push("📅 تاریخ نرخ جهانی: "+label+
+        (item.oilType==="spot"?" (نقدی)":item.oilType==="futures"?" (آتی)":"")+
+        (item.delayed?" ⚠️ آخرین نرخ ذخیره‌شده":""));
+    }
+  }
+  return lines.join("\n");
+}
+function report(pr,format="text") {
   return [
-    "📊 قیمت‌ها | 🕒 "+date,
-    priceLine(pr.btc,"btc"),
-    priceLine(pr.oil,"oil"),
-    priceLine(pr.usdt,"usdt"),
-    priceLine(pr.gold,"gold"),
-    "ℹ️ رشدها اسمی و مبناها تقریبی‌اند؛ توضیح: 📚 منابع"
+    "📡 رصدینو | نبض بازار",
+    persianDateTime(pr.at),
+    "━━━━━━━━━━━━━━━━",
+    marketPriceBlock(pr.btc,"btc",format),
+    "",
+    marketPriceBlock(pr.oil,"oil",format),
+    "",
+    marketPriceBlock(pr.usdt,"usdt",format),
+    "",
+    marketPriceBlock(pr.gold,"gold",format),
+    "━━━━━━━━━━━━━━━━",
+    "ⓘ رشدها اسمی و مبناهای تاریخی تقریبی‌اند؛ جزئیات: 📚 منابع"
   ].join("\n");
 }
 function sourcesMessage() {
@@ -1211,7 +1268,7 @@ async function onTelegram(update, env) {
       user.notifications_enabled?"🔔 اعلان قیمت روشن":"🔕 اعلان قیمت خاموش | /subscribe");
   }
   if(cmd==="/price" || cmd==="/now" || line==="💰 قیمت" || line==="📊 قیمت بازار")
-    return send(env,chatId,report(await prices(env)),priceResultKeyboard());
+    return send(env,chatId,report(await prices(env),"html"),priceResultKeyboard(),"HTML");
   if(cmd==="/weather" || line==="🌤 آب و هوا" || line==="🌤 هواشناسی")
     return sendWeatherMenu(env,chatId);
   if(cmd==="/sources" || line==="📚 منابع" || line==="📚 منابع اطلاعات")
@@ -1325,7 +1382,7 @@ export default {
       const owner = await env.STATE.get("owner_chat_id");
       let message = null;
       for await (const chatId of notificationTargets(env)) {
-        if (message === null) message = report(await prices(env));
+        if (message === null) message = report(await prices(env),"html");
         await deliverScheduledReport(env, chatId, owner, slot, message);
       }
     })().catch(e => {console.log("Scheduled report failed: " + String(e.message)); throw e;}));
