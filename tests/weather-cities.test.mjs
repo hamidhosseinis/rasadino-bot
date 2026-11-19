@@ -164,7 +164,7 @@ test("Manual and scheduled price reports omit provider names and URLs",async t=>
   const e=env();
   assert.equal((await update(e,"/price",1200)).status,200);
   let message=lastSent(telegram).text;
-  assert.match(message,/قیمت‌ها/);
+  assert.match(message,/نبض بازار/);
   assert.match(message,/بیت‌کوین/);
   assert.match(message,/نفت خام برنت/);
   assert.doesNotMatch(message,/دلار آزاد/);
@@ -179,6 +179,6 @@ test("Manual and scheduled price reports omit provider names and URLs",async t=>
     {waitUntil(task){scheduled.push(task)}});
   await Promise.all(scheduled);
   message=lastSent(telegram).text;
-  assert.match(message,/قیمت‌ها/);
+  assert.match(message,/نبض بازار/);
   assert.doesNotMatch(message,/CoinGecko|Coinbase|TGJU|open-meteo|منابع:/);
 });
