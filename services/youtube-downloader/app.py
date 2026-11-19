@@ -1,4 +1,4 @@
-"""Private YouTube -> Telegram video-delivery sidecar for Rasadino.
+"""Public YouTube -> Telegram video-delivery sidecar for Rasadino.
 
 Only use for videos you own or are authorized to download. No DRM bypass.
 Runs on a separate Python host, not Cloudflare Workers.
@@ -122,13 +122,10 @@ def health():
 def submit(job: Job, tasks: BackgroundTasks, x_download_key: str | None = Header(default=None)):
     secret = os.getenv("DOWNLOAD_API_KEY", "")
     token = os.getenv("BOT_TOKEN", "")
-    owner = os.getenv("OWNER_CHAT_ID", "")
-    if not secret or not token or not owner:
+    if not secret or not token:
         raise HTTPException(status_code=503, detail="Not configured")
     if not x_download_key or not hmac.compare_digest(x_download_key, secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    if job.chat_id != owner:
-        raise HTTPException(status_code=403, detail="Forbidden")
     if not canonical_video_url(job.youtube_url):
         raise HTTPException(status_code=400, detail="Invalid YouTube URL")
     if not _slot.acquire(blocking=False):
