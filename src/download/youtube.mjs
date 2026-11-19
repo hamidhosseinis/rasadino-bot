@@ -1,8 +1,5 @@
 // YouTube URL validation and a public, authenticated file-delivery backend.
 // Workers cannot run yt-dlp; no download is claimed unless a backend accepts a job.
-export const YOUTUBE_PENDING_PREFIX = "download:youtube:pending:";
-export const YOUTUBE_PENDING_TTL = 300;
-
 export function canonicalYouTubeVideoUrl(value) {
   if(typeof value !== "string" || value.length > 500 || /\s/.test(value))return null;
   let url;
