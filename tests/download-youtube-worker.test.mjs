@@ -51,48 +51,75 @@ function menuButtons(sent) {
   const item=sent.filter(x=>["sendMessage","editMessageText"].includes(x.method)).at(-1);
   return item?.payload.reply_markup?.inline_keyboard.flat()||[];
 }
-test("all registered private users see the download button and can open it",async t=>{
-  const {sent,jobs}=network(t); const e=env();
-  assert.equal((await deliver(e,1234,"/start",101)).status,200);
-  assert.ok(menuButtons(sent).some(x=>x.callback_data==="download:youtube"));
-  assert.equal((await deliver(e,6789,"/start",102)).status,200);
-  assert.ok(menuButtons(sent).some(x=>x.callback_data==="download:youtube"));
-  assert.equal((await deliver(e,6789,"/download",103)).status,200);
-  assert.match(sent.at(-1).payload.text,/لینک ویدئوی یوتیوب/);
-  assert.equal(jobs.length,0);
-});
-test("public user receives prompt; invalid links never call backend; valid URLs queue file job",async t=>{
+test("all users get the normal menu without any download button",async t=>{
   const {sent,jobs}=network(t);const e=env();
-  assert.equal((await deliver(e,6789,"download:youtube",104,true)).status,200);
-  assert.match(sent.at(-1).payload.text,/لینک ویدئوی یوتیوب/);
-  assert.equal((await deliver(e,6789,"https://notyoutube.org",105)).status,200);
-  assert.match(sent.at(-1).payload.text,/لینک معتبر/);
+  for(const [chat,text,n] of [[1234,"/start",101],[6789,"/start",102],[6789,"/menu",103]]){
+    assert.equal((await deliver(e,chat,text,n)).status,200);
+    assert.ok(!menuButtons(sent).some(x=>x.callback_data==="download:youtube"));
+    assert.ok(!menuButtons(sent).some(x=>x.text?.includes("دانلود")));
+  }
   assert.equal(jobs.length,0);
-  assert.equal((await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",106)).status,200);
-  assert.equal(jobs.length,1);
-  assert.deepEqual(jobs[0],{url:"https://download.example.test/jobs",chat_id:"6789",youtube_url:"https://www.youtube.com/watch?v=dQw4w9WgXcQ"});
-  assert.match(sent.at(-1).payload.text,/درخواست ثبت شد/);
-  assert.equal((await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",107)).status,200);
-  assert.equal(jobs.length,1,"the pending state clears after accepted request");
 });
-test("a missing sidecar never pretends a video was downloaded",async t=>{
+
+test("first message can be YouTube URL without /start, /download or a button",async t=>{
+  const {sent,jobs}=network(t);const e=env();
+  assert.equal((await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ?t=2",104)).status,200);
+  assert.equal(jobs.length,1);
+  assert.deepEqual(jobs[0],{
+    url:"https://download.example.test/jobs",chat_id:"6789",
+    youtube_url:"https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  });
+  assert.match(sent.at(-1).payload.text,/درخواست ثبت شد/);
+  assert.equal((await deliver(e,1234,"https://www.youtube.com/shorts/4M7qGbEA9tg",105)).status,200);
+  assert.equal(jobs.length,2);
+});
+
+test("YouTube video links take priority over a pending music search",async t=>{
+  const {sent,jobs}=network(t);const e=env();
+  await e.STATE.put("music:pending:6789","file");
+  assert.equal((await deliver(e,6789,"https://www.youtube.com/watch?v=dQw4w9WgXcQ",108)).status,200);
+  assert.equal(jobs.length,1);
+  assert.match(sent.at(-1).payload.text,/درخواست ثبت شد/);
+});
+
+test("non-YouTube links and unrelated messages do not trigger video jobs",async t=>{
+  const {sent,jobs}=network(t);const e=env();
+  for(const [text,n] of [
+    ["https://notyoutube.org/watch?v=dQw4w9WgXcQ",110],
+    ["https://youtube.com/playlist?list=xyz",111],
+    ["سلام",112],["/download",113]
+  ]){
+    assert.equal((await deliver(e,6789,text,n)).status,200);
+  }
+  assert.equal(jobs.length,0);
+  assert.ok(!menuButtons(sent).some(x=>x.callback_data==="download:youtube"));
+});
+
+test("missing backend never reports success or sends a video",async t=>{
   const {sent,jobs}=network(t);const e=env("1234",false);
-  await deliver(e,1234,"/download",108);
-  assert.equal((await deliver(e,1234,"https://youtu.be/dQw4w9WgXcQ",109)).status,200);
+  assert.equal((await deliver(e,8765,"https://youtu.be/dQw4w9WgXcQ",120)).status,200);
   assert.match(sent.at(-1).payload.text,/دانلود فعلاً فعال نیست/);
   assert.equal(jobs.length,0);
 });
 
-test("public user cannot submit more than three accepted downloads a UTC day",async t=>{
+test("each user is limited to three accepted videos per UTC day",async t=>{
   const {sent,jobs}=network(t);const e=env();
   for(let i=0;i<3;i++){
-    await deliver(e,6789,"/download",210+i*2);
-    assert.equal((await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",211+i*2)).status,200);
+    assert.equal((await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",210+i)).status,200);
     await e.STATE.delete("download:youtube:cooldown:6789");
   }
   assert.equal(jobs.length,3);
-  await deliver(e,6789,"/download",216);
-  assert.equal((await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",217)).status,200);
+  assert.equal((await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",214)).status,200);
   assert.equal(jobs.length,3);
   assert.match(sent.at(-1).payload.text,/سهمیه امروز/);
+  assert.equal((await deliver(e,1234,"https://youtu.be/dQw4w9WgXcQ",215)).status,200);
+  assert.equal(jobs.length,4,"another user's allowance stays separate");
+});
+
+test("cooldown blocks duplicate rapid link submissions",async t=>{
+  const {sent,jobs}=network(t);const e=env();
+  await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",220);
+  await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",221);
+  assert.equal(jobs.length,1);
+  assert.match(sent.at(-1).payload.text,/کمی بعد/);
 });
