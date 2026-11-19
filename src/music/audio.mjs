@@ -65,6 +65,7 @@ export function normalizeCommonsFile(page) {
   if (!info || !isCC0(info.extmetadata) || !Number.isFinite(info.size)
       || info.size < 100_000 || info.size > MAX_AUDIO_BYTES
       || !/^audio\/(?:mpeg|mp3)$/i.test(String(info.mime??""))) return null;
+  if(!/\.mp3$/i.test(page.title))return null;
   const url=safeCommonsAudio(info.url);
   if (!url)return null;
   const title=page.title.slice(5).replace(/\.mp3$/i,"").replace(/[_]+/g," ").trim();
