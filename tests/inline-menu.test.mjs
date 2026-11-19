@@ -119,10 +119,12 @@ test("all price options display only chosen asset or full report; refresh uses p
   const {calls,external}=telegramStub(t);
   const e=env();
   for(const [data,n,keyword] of [["price:btc",400,"بیت‌کوین"],["price:usdt",401,"تتر"],
-    ["price:gold",402,"طلا"],["price:all",403,"قیمت‌ها"],
-    ["price:refresh",404,"قیمت‌ها"]]){
+    ["price:gold",402,"طلا"],["price:all",403,"نبض بازار"],
+    ["price:refresh",404,"نبض بازار"]]){
     assert.equal((await deliver(e,callback(994,data,n))).status,200,data);
     assert.match(last(calls,"editMessageText").text,new RegExp(keyword));
+    assert.equal(last(calls,"editMessageText").parse_mode,"HTML");
+    assert.match(last(calls,"editMessageText").text,/📡 رصدینو \| نبض بازار/);
     assert.ok(last(calls,"editMessageText").reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="price:menu"));
   }
   assert.ok(external.some(s=>s.includes("coingecko")));
@@ -162,4 +164,27 @@ test("news page, detail and back edit same message and preserve source link",asy
   assert.ok(detail.reply_markup.inline_keyboard.flat().some(b=>b.url==="https://example.com/news/5"));
   assert.equal(detail.message_id,77);
   assert.deepEqual(external,[]);
+});
+
+test("market report supports bold Telegram prices, sources, refresh and return",async t=>{
+  const {calls}=telegramStub(t);
+  const e=env();
+  assert.equal((await deliver(e,message(988,"/price",800))).status,200);
+  const initial=last(calls,"sendMessage");
+  assert.equal(initial.parse_mode,"HTML");
+  assert.match(initial.text,/<b>/);
+  const buttons=initial.reply_markup.inline_keyboard.flat();
+  assert.ok(buttons.some(x=>x.callback_data==="price:sources"));
+  assert.ok(buttons.some(x=>x.callback_data==="price:refresh"));
+  assert.equal((await deliver(e,callback(988,"price:sources",801))).status,200);
+  const source=last(calls,"editMessageText");
+  assert.match(source.text,/📚 منابع اطلاعات/);
+  assert.ok(source.reply_markup.inline_keyboard.flat().some(x=>x.callback_data==="price:all"));
+  assert.equal((await deliver(e,callback(988,"price:all",802))).status,200);
+  const back=last(calls,"editMessageText");
+  assert.equal(back.parse_mode,"HTML");
+  assert.match(back.text,/نبض بازار/);
+  assert.equal((await deliver(e,callback(988,"price:refresh",803))).status,200);
+  assert.equal(last(calls,"editMessageText").parse_mode,"HTML");
+  assert.equal(calls.filter(x=>x.method==="sendMessage").length,1);
 });

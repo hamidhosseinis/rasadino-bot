@@ -16,8 +16,8 @@ test("core screens stay compact without hiding key facts",()=>{
   const snapshot={at:now,btc:quote(95000),usdt:quote(110000),gold:quote(10000000),
     oil:{...quote(95),marketDate:now.slice(0,10),oilType:"futures"}};
   const market=report(snapshot);
-  assert.ok(market.length<800,"The price card should fit without scrolling through prose");
-  assert.equal(market.split("\n").length,6);
+  assert.ok(market.length<1200,"The price card should stay concise and fully readable");
+  assert.equal(market.split("\n").length,25);
   assert.match(market,/۱۳۵۷/);
   assert.match(market,/رشدها اسمی/);
 
@@ -54,4 +54,27 @@ test("music screens are concise while official track links remain",()=>{
   assert.ok(rec.text.length<450);
   assert.equal(rec.keyboard.inline_keyboard[0][0].url,track.play_url);
   assert.match(rec.text,/۱۸ ماه گذشته/);
+});
+
+test("market pulse HTML highlights only valid quoted amounts and preserves oil trade date",()=>{
+  const at="2026-11-19T04:40:00Z";
+  const quote=value=>({value,updatedAt:at});
+  const pr={at,btc:quote(63440.16),oil:{...quote(91.57),marketDate:"2026-11-18",
+    oilType:"futures",delayed:true},usdt:quote(270361),gold:quote(24459600)};
+  const html=report(pr,"html");
+  const plain=report(pr);
+  assert.match(html,/📡 رصدینو \| نبض بازار/);
+  assert.match(html,/<b>۶۳٬۴۴۰٫۱۶ دلار<\/b>/);
+  assert.match(html,/<b>۹۱٫۵۷ دلار \/ بشکه<\/b>/);
+  assert.match(html,/<b>۲۷۰٬۳۶۱ تومان<\/b>/);
+  assert.match(html,/📅 تاریخ نرخ جهانی/);
+  assert.match(html,/آتی/);
+  assert.match(html,/آخرین نرخ ذخیره‌شده/);
+  assert.match(html,/تتر آن زمان وجود نداشت/);
+  assert.match(html,/شاخص متفاوت/);
+  assert.doesNotMatch(plain,/<b>|<\/b>/);
+  assert.doesNotMatch(html,/💵/);
+  const missing=report({...pr,oil:{value:null,stale:true}},"html");
+  assert.match(missing,/⚠️ نرخ معتبر در دسترس نیست/);
+  assert.doesNotMatch(missing,/<b>در دسترس نیست<\/b>/);
 });
