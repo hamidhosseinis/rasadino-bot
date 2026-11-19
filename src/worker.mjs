@@ -1129,6 +1129,7 @@ function priceLine(item,asset) {
       note:"۱۳۵۷؛ برآورد حدود ۳۰ تومان"}
   }[asset];
   if(!data)return "قیمت نامشخص";
+  if(!validPriceQuote(item))return data.title+": در دسترس نیست";
   const marketInfo=asset==="oil" && item?.marketDate && validPriceQuote(item)
     ? " | 📅 تاریخ نرخ جهانی: "+new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
         timeZone:"UTC",year:"numeric",month:"2-digit",day:"2-digit"
@@ -1136,7 +1137,7 @@ function priceLine(item,asset) {
       (item.oilType==="spot"?" (نقدی)":" (آتی)")+
       (item.delayed?" ⚠️ آخرین نرخ ذخیره‌شده":"")
     : "";
-  return data.title+": "+money(item,data.currency)+" | 📈 "+growthText(item,data.baseline)+
+  return data.title+": "+money(item,data.currency)+" | "+growthText(item,data.baseline)+
     " ("+data.note+")"+marketInfo;
 }
 function report(pr) {
