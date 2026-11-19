@@ -51,14 +51,22 @@ function menuButtons(sent) {
   const item=sent.filter(x=>["sendMessage","editMessageText"].includes(x.method)).at(-1);
   return item?.payload.reply_markup?.inline_keyboard.flat()||[];
 }
-test("all users get the normal menu without any download button",async t=>{
+test("public download button appears for every user and opens the link prompt",async t=>{
   const {sent,jobs}=network(t);const e=env();
   for(const [chat,text,n] of [[1234,"/start",101],[6789,"/start",102],[6789,"/menu",103]]){
     assert.equal((await deliver(e,chat,text,n)).status,200);
-    assert.ok(!menuButtons(sent).some(x=>x.callback_data==="download:youtube"));
-    assert.ok(!menuButtons(sent).some(x=>x.text?.includes("دانلود")));
+    assert.ok(menuButtons(sent).some(x=>x.callback_data==="download:youtube"));
   }
+  assert.equal((await deliver(e,6789,"download:youtube",104,true)).status,200);
+  assert.match(sent.at(-1).payload.text,/لینک ویدئوی یوتیوب/);
   assert.equal(jobs.length,0);
+  assert.equal((await deliver(e,6789,"https://youtu.be/dQw4w9WgXcQ",105)).status,200);
+  assert.equal(jobs.length,1);
+  assert.equal(jobs[0].chat_id,"6789");
+  assert.match(sent.at(-1).payload.text,/درخواست ثبت شد/);
+  // The command is an optional shortcut; no per-user pending state is required.
+  assert.equal((await deliver(e,1234,"/download",106)).status,200);
+  assert.match(sent.at(-1).payload.text,/لینک ویدئوی یوتیوب/);
 });
 
 test("first message can be YouTube URL without /start, /download or a button",async t=>{
@@ -87,12 +95,12 @@ test("non-YouTube links and unrelated messages do not trigger video jobs",async 
   for(const [text,n] of [
     ["https://notyoutube.org/watch?v=dQw4w9WgXcQ",110],
     ["https://youtube.com/playlist?list=xyz",111],
-    ["سلام",112],["/download",113]
+    ["سلام",112],["/unknown",113]
   ]){
     assert.equal((await deliver(e,6789,text,n)).status,200);
   }
   assert.equal(jobs.length,0);
-  assert.ok(!menuButtons(sent).some(x=>x.callback_data==="download:youtube"));
+  assert.ok(menuButtons(sent).some(x=>x.callback_data==="download:youtube"));
 });
 
 test("missing backend never reports success or sends a video",async t=>{
