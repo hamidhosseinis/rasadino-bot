@@ -119,7 +119,7 @@ test("subscriptions and /stop are independent and never unlink owner", async (t)
   assert.equal(JSON.parse(await e.STATE.get("user:1002")).notifications_enabled,true);
   assert.equal(await e.STATE.get("owner_chat_id"),"1001");
   await message(e,1001,"/status",7);
-  assert.match(calls.at(-1).payload.text,/غیرفعال/);
+  assert.match(calls.at(-1).payload.text,/خاموش/);
 });
 test("callback is accessible to its private-chat user, not impersonators", async (t) => {
   const calls = fakeTelegram(t);
@@ -139,14 +139,14 @@ test("scheduled reports go to subscribed users only; are deduplicated per slot",
   await message(e,4003,"/start",11);
   await message(e,4002,"/subscribe",12);
   await cron(e,"2026-11-07T06:30:00.000Z");
-  let sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 گزارش قیمت"));
+  let sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 قیمت‌ها"));
   assert.deepEqual(sends.map(x=>String(x.payload.chat_id)).sort(),["4001","4002"]);
   await cron(e,"2026-11-07T06:30:00.000Z");
-  sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 گزارش قیمت"));
+  sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 قیمت‌ها"));
   assert.equal(sends.length,2);
   await message(e,4001,"/stop",13);
   await cron(e,"2026-11-07T18:30:00.000Z");
-  sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 گزارش قیمت"));
+  sends = calls.filter(x=>x.method==="sendMessage" && x.payload.text.startsWith("📊 قیمت‌ها"));
   assert.deepEqual(sends.map(x=>String(x.payload.chat_id)).sort(),["4001","4002","4002"]);
 });
 test("KV list paging covers more than 1000 opted-in users", async () => {

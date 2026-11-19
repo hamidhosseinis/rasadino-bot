@@ -103,52 +103,35 @@ async function removeLegacyKeyboardOnce(env,chatId) {
     metadata:{notifications_enabled:user.notifications_enabled}
   });
 }
+
 function priceViewText(pr,asset="all") {
-  const names = {
-    btc:priceLine(pr.btc,"btc"),
-    oil:priceLine(pr.oil,"oil"),
-    usdt:priceLine(pr.usdt,"usdt"),
-    gold:priceLine(pr.gold,"gold")
-  };
-  if(asset==="all")return report(pr);
-  return "💰 آخرین قیمت ثبت‌شده\n\n"+names[asset]+
-    "\n\nℹ️ مبنای سال ۱۳۵۷ تقریبی و درصدها اسمی‌اند؛ جزئیات در 📚 منابع.\n\n🕒 آخرین دریافت معتبر: "+(pr[asset]?.updatedAt
-      ? new Intl.DateTimeFormat("fa-IR",{
-          timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
-        }).format(new Date(pr[asset].updatedAt))
-      : "نامشخص");
+  if (asset==="all") return report(pr);
+  const selected={btc:pr.btc,oil:pr.oil,usdt:pr.usdt,gold:pr.gold};
+  const item=selected[asset];
+  const when=item?.updatedAt ? new Intl.DateTimeFormat("fa-IR",{
+    timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
+  }).format(new Date(item.updatedAt)) : "نامشخص";
+  return "💰 "+priceLine(item,asset)+"\n🕒 "+when+"\nℹ️ مبنای رشد: 📚 منابع";
 }
 async function showMainMenu(env,chatId,messageId=null,note="") {
   return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
 }
 async function showPriceMenu(env,chatId,messageId=null) {
-  return renderMenu(env,chatId,"💰 قیمت‌های رصدینو\n\n👇 قیمت موردنظر را انتخاب کن.",priceMenuKeyboard(),messageId);
+  return renderMenu(env,chatId,"💰 قیمت‌ها | انتخاب کن:",priceMenuKeyboard(),messageId);
 }
 async function showSupport(env,chatId,messageId=null) {
   return renderMenu(env,chatId,
-    "💬 ارتباط با پشتیبان رصدینو\nبرای گفتگوی خصوصی با مدیر، دکمه زیر را بزن یا به @hamidhosseinis پیام بده.",
+    "💬 پشتیبانی: @hamidhosseinis",
     {inline_keyboard:[
       [{text:"💬 گفتگو با پشتیبان",url:"https://t.me/hamidhosseinis"}],
       ...BACK_CLOSE
     ]},messageId);
 }
 
-function welcome() {
-  return [
-    "👋 به رصدینو | Rasadino خوش آمدی!",
-    "",
-    "📡 رصدینو دستیار هوشمند رصد اطلاعات و اعلان‌هاست.",
-    "💰 با دکمه «قیمت» نرخ بیت‌کوین، نفت برنت، تتر و طلای ۱۸ عیار و رشد تاریخی آن‌ها را ببین.",
-    "🕙 گزارش خودکار بازار ساعت ۱۰ صبح و ۱۰ شب، فقط برای کاربران دارای اشتراک اعلان ارسال می‌شود.",
-    "🌤 آب و هوای ۶ شهر منتخب و 📰 اخبار استان گلستان آماده‌اند.",
-    "🎧 رصد موزیک: جست‌وجوی آهنگ و پیشنهاد خودکار ژانری؛ شخصی‌سازی در حال توسعه.",
-    "📚 برای دیدن منابع قیمت و هواشناسی، دکمه «منابع» را بزن.",
-    "💬 برای ارتباط با مدیر، دکمه «پشتیبان» را انتخاب کن.",
-    "",
-    "👇 یکی از دکمه‌های زیر را انتخاب کن."
-  ].join("\n");
-}
 
+function welcome() {
+  return "👋 به رصدینو خوش آمدی!\n💰 قیمت | 🌤 هواشناسی | 📰 اخبار | 🎧 رصد موزیک\n👇 انتخاب کن:";
+}
 /* Selected Golestan cities; public Open-Meteo model coordinates for city centers. */
 const GOLESTAN_CITIES = Object.freeze([
   {id:"bandargaz", name:"بندرگز", latitude:36.77200, longitude:53.94810},
@@ -205,47 +188,31 @@ async function fetchCityForecast(city) {
   }
   return {city:city.name,current:data.current,daily:data.daily,updatedAt:data.current.time};
 }
+
 async function getWeatherReport(env) {
-  const cacheKey = "weather:golestan:6cities:v2";
-  try {
-    const cached = await env.STATE.get(cacheKey);
-    if(cached) return cached;
-  }catch(e){ console.log("Weather KV read skipped: "+String(e)); }
-  const results = await Promise.all(GOLESTAN_CITIES.map(async city=>{
-    try { return await fetchCityForecast(city); }
-    catch(e) { console.log("Weather fetch "+city.id+": "+String(e)); return {city:city.name,error:true}; }
+  const cacheKey="weather:golestan:6cities:compact:v1";
+  try {const cached=await env.STATE.get(cacheKey);if(cached)return cached;}
+  catch(e){console.log("Weather KV read skipped: "+String(e));}
+  const results=await Promise.all(GOLESTAN_CITIES.map(async city=>{
+    try{return await fetchCityForecast(city);}
+    catch(e){console.log("Weather fetch "+city.id+": "+String(e));return {city:city.name,error:true};}
   }));
-  const stamp = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-    timeZone:"Asia/Tehran",dateStyle:"medium",timeStyle:"short"
-  }).format(new Date());
-  const rows = ["🌤 هواشناسی ۶ شهر منتخب استان گلستان","🗓 "+stamp,""];
+  const rows=["🌤 هواشناسی گلستان | ۶ شهر"];
   for(const data of results){
-    rows.push("📍 "+data.city);
-    if(data.error){
-      rows.push("داده معتبر هواشناسی در دسترس نیست.","");
-      continue;
-    }
-    const c=data.current, d=data.daily;
-    rows.push("اکنون: "+weatherDescription(c.weather_code)+" | "+weatherNumber(c.temperature_2m,1)+"°C"+
-      " (احساسی "+weatherNumber(c.apparent_temperature,1)+"°C)");
-    rows.push("رطوبت: "+weatherNumber(c.relative_humidity_2m)+"٪ | باد: "+weatherNumber(c.wind_speed_10m)+" km/h");
-    for(let day=0;day<2;day++){
-      rows.push((day===0?"امروز":"فردا")+": "+weatherDescription(d.weather_code?.[day])+
-        " | "+weatherNumber(d.temperature_2m_min?.[day],1)+" تا "+weatherNumber(d.temperature_2m_max?.[day],1)+"°C"+
-        " | احتمال بارش تا "+weatherNumber(d.precipitation_probability_max?.[day])+"٪"+
-        " | بارش "+weatherNumber(d.precipitation_sum?.[day],1)+" mm");
-    }
-    rows.push("");
+    if(data.error){rows.push("📍 "+data.city+": ⚠️ داده معتبر موجود نیست");continue;}
+    const c=data.current,d=data.daily;
+    rows.push("📍 "+data.city+": "+weatherDescription(c.weather_code)+" "+weatherNumber(c.temperature_2m,1)+"°"+
+      " | امروز "+weatherNumber(d.temperature_2m_min?.[0],1)+"–"+weatherNumber(d.temperature_2m_max?.[0],1)+"°"+
+      " | فردا "+weatherNumber(d.temperature_2m_min?.[1],1)+"–"+weatherNumber(d.temperature_2m_max?.[1],1)+"°"+
+      " | 🌧 "+weatherNumber(d.precipitation_probability_max?.[0])+"٪");
   }
-  const report = rows.join("\n");
+  const result=rows.join("\n");
   if(results.some(x=>!x.error)){
-    try {await env.STATE.put(cacheKey,report,{expirationTtl:600});}
+    try{await env.STATE.put(cacheKey,result,{expirationTtl:600});}
     catch(e){console.log("Weather KV write skipped: "+String(e));}
   }
-  return report;
+  return result;
 }
-
-
 function cityWeatherKeyboard() {
   const inline_keyboard = [];
   for(let i=0;i<GOLESTAN_CITIES.length;i+=2) {
@@ -258,7 +225,7 @@ function cityWeatherKeyboard() {
 }
 async function sendWeatherMenu(env,chatId,messageId=null) {
   return renderMenu(env,chatId,
-    "🌤 آب‌وهوای ۶ شهر منتخب گلستان\n\n👇 شهر موردنظر را انتخاب کن تا پیش‌بینی همان شهر نمایش داده شود.",
+    "🌤 هواشناسی گلستان | ۶ شهر | انتخاب کن:",
     cityWeatherKeyboard(),messageId);
 }
 async function singleCityWeather(env,cityId) {
@@ -278,24 +245,18 @@ async function singleCityWeather(env,cityId) {
       return "⚠️ اطلاعات به‌روز "+city.name+" فعلاً در دسترس نیست؛ لطفاً کمی بعد دوباره امتحان کن.";
     }
   }
+
   const c=data.current,d=data.daily;
-  const time=new Intl.DateTimeFormat("fa-IR",{timeZone:TIMEZONE,hour:"2-digit",minute:"2-digit"}).format(new Date(data.updatedAt+"+03:30"));
+  const time=new Intl.DateTimeFormat("fa-IR",{timeZone:TIMEZONE,hour:"2-digit",minute:"2-digit"})
+    .format(new Date(data.updatedAt+"+03:30"));
   return [
-    "🌤 آب‌وهوای "+city.name,
-    "🕒 وضعیت ساعت "+time+" (ایران)",
-    "",
-    weatherDescription(c.weather_code)+" | "+weatherNumber(c.temperature_2m,1)+"°C",
-    "🌡 دمای احساسی: "+weatherNumber(c.apparent_temperature,1)+"°C",
-    "💧 رطوبت: "+weatherNumber(c.relative_humidity_2m)+"٪ | 💨 باد: "+weatherNumber(c.wind_speed_10m)+" کیلومتر/ساعت",
-    "",
-    "📅 امروز: "+weatherNumber(d.temperature_2m_min?.[0],1)+" تا "+weatherNumber(d.temperature_2m_max?.[0],1)+"°C"+
-      " | 🌧 احتمال بارش "+weatherNumber(d.precipitation_probability_max?.[0])+"٪",
-    "📅 فردا: "+weatherNumber(d.temperature_2m_min?.[1],1)+" تا "+weatherNumber(d.temperature_2m_max?.[1],1)+"°C"+
-      " | 🌧 احتمال بارش "+weatherNumber(d.precipitation_probability_max?.[1])+"٪",
-    ""
+    "🌤 آب‌وهوای "+city.name+" | 🕒 "+time,
+    weatherDescription(c.weather_code)+" "+weatherNumber(c.temperature_2m,1)+"° (احساسی "+weatherNumber(c.apparent_temperature,1)+"°)",
+    "💧 "+weatherNumber(c.relative_humidity_2m)+"٪ | 💨 "+weatherNumber(c.wind_speed_10m)+" km/h",
+    "امروز: "+weatherNumber(d.temperature_2m_min?.[0],1)+"–"+weatherNumber(d.temperature_2m_max?.[0],1)+"° | 🌧 "+weatherNumber(d.precipitation_probability_max?.[0])+"٪",
+    "فردا: "+weatherNumber(d.temperature_2m_min?.[1],1)+"–"+weatherNumber(d.temperature_2m_max?.[1],1)+"° | 🌧 "+weatherNumber(d.precipitation_probability_max?.[1])+"٪"
   ].join("\n");
 }
-
 /* Public user registry. Store only the Telegram chat ID (as KV key) and opt-in state. */
 const USER_PREFIX = "user:";
 function userKey(chatId) {
@@ -430,7 +391,7 @@ async function onCallbackQuery(query,env) {
   if(action==="menu:close"){
     await clearPendingMusic(env,chatId);
     return renderMenu(env,chatId,
-      "✅ منو بسته شد. هر زمان خواستی، دستور /menu یا /start را بفرست.",
+      "✅ منو بسته شد | بازکردن: /menu",
       {inline_keyboard:[]},messageId);
   }
   if(/^music:preview:/.test(action)){
@@ -495,7 +456,7 @@ async function onCallbackQuery(query,env) {
     catch(e){
       console.log("News detail delivery failed: "+String(e.message));
       return renderMenu(env,chatId,
-        "⚠️ نمایش جزئیات خبر ممکن نشد. لطفاً دوباره اخبار را باز کن.",
+        "⚠️ خطای جزئیات خبر؛ دوباره اخبار را باز کن.",
         simpleBackKeyboard(),messageId);
     }
   }
@@ -507,7 +468,7 @@ async function onCallbackQuery(query,env) {
   if(action.startsWith("weather:") && GOLESTAN_CITIES.some(city=>action==="weather:"+city.id)){
     const weatherText=await singleCityWeather(env,action.slice(8));
     return renderMenu(env,chatId,weatherText,{inline_keyboard:[
-      [{text:"🔁 انتخاب شهر دیگر",callback_data:"weather:menu"}],
+      [{text:"🌤 شهر دیگر",callback_data:"weather:menu"}],
       ...BACK_CLOSE
     ]},messageId);
   }
@@ -853,56 +814,40 @@ async function readNewsView(env, id) {
     return snapshot?.items && newsViewId(snapshot) === id ? snapshot : null;
   } catch (_) { return null; }
 }
-function makeNewsMessage(snapshot, page=0, viewId=null) {
-  const fallbackKeyboard = [
-    [{text:"🔄 بررسی دوباره خبرها", callback_data:"news:refresh"}],
-    ...BACK_CLOSE
+
+function makeNewsMessage(snapshot,page=0,viewId=null) {
+  const fallbackKeyboard=[
+    [{text:"🔄 تازه‌سازی",callback_data:"news:refresh"}],...BACK_CLOSE
   ];
-  if (!snapshot?.items?.length) {
-    return {
-      text:"📰 اخبار استان گلستان\n\n⚠️ در حال حاضر تیتر خبری قابل‌تأیید در دسترس نیست.",
-      inline_keyboard:fallbackKeyboard
-    };
-  }
-  const pageNumber = page === 1 ? 1 : 0;
-  const offset = pageNumber * 5;
-  const items = snapshot.items.slice(offset, offset + 5);
-  if (!items.length) {
-    return {text:"📰 خبر بیشتری موجود نیست.", inline_keyboard:[
-      [{text:"⬅️ بازگشت به پنج خبر اول", callback_data:viewId ? "news:view:"+viewId+":0" : "news:page:0"}],
-      ...BACK_CLOSE
-    ]};
-  }
-  const lines = [
-    "📰 اخبار استان گلستان — ۴۸ ساعت اخیر" + (pageNumber ? " | صفحه دوم" : ""),
-    snapshot.stale ? "⚠️ این فهرست مربوط به آخرین گردآوری موفق است." : "",
-    ""
-  ].filter(Boolean);
-  const keyboard = [];
-  items.forEach((item, i) => {
-    const number = offset + i + 1;
-    // Title only: date, publisher and full URL are available on demand.
-    lines.push(number + "️⃣ " + item.title.slice(0, 180));
-    lines.push("");
-    keyboard.push([{
-      text:"🔎 جزئیات خبر " + new Intl.NumberFormat("fa-IR").format(number),
-      callback_data:viewId ? "news:detail:"+viewId+":"+number.toString(36) : "news:refresh"
-    }]);
+  if(!snapshot?.items?.length)return {
+    text:"📰 اخبار استان گلستان\n⚠️ خبر معتبر در دسترس نیست.",
+    inline_keyboard:fallbackKeyboard
+  };
+  const pageNumber=page===1?1:0,offset=pageNumber*5;
+  const items=snapshot.items.slice(offset,offset+5);
+  if(!items.length)return {text:"📰 خبر بیشتری نیست.",inline_keyboard:[
+    [{text:"⬅️ پنج خبر اول",callback_data:viewId?"news:view:"+viewId+":0":"news:page:0"}],
+    ...BACK_CLOSE
+  ]};
+  const lines=["📰 اخبار استان گلستان | ۴۸ ساعت اخیر"+(pageNumber?" | صفحه دوم":"")];
+  if(snapshot.stale)lines.push("⚠️ آخرین فهرست ذخیره‌شده");
+  const keyboard=[];
+  const details=[];
+  items.forEach((item,i)=>{
+    const number=offset+i+1;
+    lines.push(new Intl.NumberFormat("fa-IR").format(number)+". "+item.title.slice(0,180));
+    details.push({text:"🔎 جزئیات "+new Intl.NumberFormat("fa-IR").format(number),
+      callback_data:viewId?"news:detail:"+viewId+":"+number.toString(36):"news:refresh"});
   });
-  lines.push("👇 برای تاریخ انتشار، منبع و لینک هر خبر، «جزئیات خبر» را بزن.");
-  if (pageNumber === 0 && snapshot.items.length > 5) {
-    const remaining = Math.min(10, snapshot.items.length) - 5;
-    keyboard.push([{
-      text:"📰 خبرهای بیشتر ("+new Intl.NumberFormat("fa-IR").format(remaining)+" خبر)",
-      callback_data:viewId ? "news:view:"+viewId+":1" : "news:page:1"
-    }]);
+  for(let i=0;i<details.length;i+=2)keyboard.push(details.slice(i,i+2));
+  if(pageNumber===0&&snapshot.items.length>5){
+    const remaining=Math.min(10,snapshot.items.length)-5;
+    keyboard.push([{text:"📰 "+new Intl.NumberFormat("fa-IR").format(remaining)+" خبر دیگر",
+      callback_data:viewId?"news:view:"+viewId+":1":"news:page:1"}]);
   }
-  if (pageNumber === 1) {
-    keyboard.push([{text:"⬅️ پنج خبر اول", callback_data:viewId ? "news:view:"+viewId+":0" : "news:page:0"}]);
-  }
-  keyboard.push([{text:"🔄 به‌روزرسانی خبرها", callback_data:"news:refresh"}]);
-  keyboard.push(...BACK_CLOSE);
-  return {text:lines.join("\n").slice(0,3900), inline_keyboard:keyboard};
+  if(pageNumber===1)keyboard.push([{text:"⬅️ پنج خبر اول",callback_data:viewId?"news:view:"+viewId+":0":"news:page:0"}]);
+  keyboard.push([{text:"🔄 تازه‌سازی",callback_data:"news:refresh"}],...BACK_CLOSE);
+  return {text:lines.join("\n").slice(0,3900),inline_keyboard:keyboard};
 }
 async function sendNewsSnapshotPage(env, chatId, snapshot, page=0, messageId=null) {
   const viewId=await persistNewsView(env,snapshot);
@@ -930,19 +875,16 @@ async function sendNewsDetail(env, chatId, viewId, relativeIndex, messageId=null
   const page = absolute >= 5 ? 1 : 0;
   const number = absolute + 1;
   const url = safeArticleLink(item.url);
-  const lines = [
-    "📰 جزئیات خبر "+new Intl.NumberFormat("fa-IR").format(number),
-    "",
-    "📝 عنوان: "+item.title,
-    "🗓 زمان انتشار: "+newsTimeLabel(item),
-    "🗞 منبع: "+item.source,
-    "📍 محدوده خبر: "+(item.county||"استان گلستان"),
-    "",
-    url ? "🔗 لینک مطالعه کامل:\n"+url : "🔗 لینک مطالعه کامل در دسترس نیست."
+
+  const lines=[
+    "📰 "+item.title,
+    "🗓 "+newsTimeLabel(item)+" | 🗞 "+item.source,
+    "📍 "+(item.county||"استان گلستان")
   ];
-  const keyboard = [];
-  if (url) keyboard.push([{text:"📖 مطالعه خبر در سایت منبع",url}]);
-  keyboard.push([{text:"⬅️ بازگشت به فهرست خبرها",callback_data:"news:view:"+viewId+":"+page}]);
+  if(!url)lines.push("🔗 لینک در دسترس نیست");
+  const keyboard=[];
+  if(url)keyboard.push([{text:"📖 متن کامل خبر",url}]);
+  keyboard.push([{text:"⬅️ فهرست خبرها",callback_data:"news:view:"+viewId+":"+page}]);
   keyboard.push(...BACK_CLOSE);
   return renderMenu(env,chatId,lines.join("\n").slice(0,3900),
     {inline_keyboard:keyboard},messageId);
@@ -1175,90 +1117,67 @@ function growthText(item, base) {
   const amount = new Intl.NumberFormat("fa-IR",{maximumFractionDigits:0}).format(Math.abs(percent));
   return (percent >= 0 ? "↗ +" : "↘ −") + amount + "٪";
 }
-function priceLine(item, asset) {
-  const data = {
-    btc:{title:"₿ بیت‌کوین",currency:"USD",baseline:HISTORICAL_BTC_USD,
-      note:"رشد از اولین نرخ دلاری ثبت‌شده (۵ اکتبر ۲۰۰۹)"},
+
+function priceLine(item,asset) {
+  const data={
+    btc:{title:"₿ بیت‌کوین",currency:"USD",baseline:HISTORICAL_BTC_USD,note:"۲۰۰۹"},
     oil:{title:"🛢 نفت خام برنت (هر بشکه)",currency:"USD",baseline:HISTORICAL_OIL_USD,
-      note:"قیاس با نفت خام مرجع مارس ۱۹۷۸ / فروردین ۱۳۵۷ (۱۲٫۶۶ دلار)"},
+      note:"۱۳۵۷؛ ۱۲٫۶۶ دلار"},
     usdt:{title:"💲 تتر (USDT)",currency:"IRR",baseline:HISTORICAL_USD_TOMAN,
-      note:"قیاس با دلار ابتدای ۱۳۵۷ (تتر آن زمان وجود نداشت)"},
+      note:"دلار ۱۳۵۷؛ تتر آن زمان وجود نداشت"},
     gold:{title:"🥇 هر گرم طلای ۱۸ عیار",currency:"IRR",baseline:HISTORICAL_GOLD18_TOMAN,
-      note:"رشد از برآورد حدود ۳۰ تومان در ابتدای ۱۳۵۷"}
+      note:"۱۳۵۷؛ برآورد حدود ۳۰ تومان"}
   }[asset];
-  if (!data) return "قیمت نامشخص";
-  const marketInfo=asset==="oil" && item?.marketDate && validPriceQuote(item) ?
-    "\n  📅 تاریخ نرخ جهانی: "+new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
-      timeZone:"UTC",year:"numeric",month:"2-digit",day:"2-digit"
-    }).format(new Date(item.marketDate+"T00:00:00Z"))+
-    (item?.oilType==="spot" ? " (نرخ نقدی برنت)" : " (قرارداد آتی برنت)")+
-    (item?.delayed ? "\n  ⚠️ آخرین نرخ ذخیره‌شده؛ دریافت تازه ناموفق بوده." : "") : "";
-  return data.title+": "+money(item,data.currency)+marketInfo+"\n  📈 "+data.note+": "+growthText(item,data.baseline);
+  if(!data)return "قیمت نامشخص";
+  if(!validPriceQuote(item))return data.title+": در دسترس نیست";
+  const marketInfo=asset==="oil" && item?.marketDate && validPriceQuote(item)
+    ? " | 📅 تاریخ نرخ جهانی: "+new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
+        timeZone:"UTC",year:"numeric",month:"2-digit",day:"2-digit"
+      }).format(new Date(item.marketDate+"T00:00:00Z"))+
+      (item.oilType==="spot"?" (نقدی)":" (آتی)")+
+      (item.delayed?" ⚠️ آخرین نرخ ذخیره‌شده":"")
+    : "";
+  return data.title+": "+money(item,data.currency)+" | "+growthText(item,data.baseline)+
+    " ("+data.note+")"+marketInfo;
 }
 function report(pr) {
-  const date = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-    timeZone: TIMEZONE, dateStyle: "full", timeStyle: "short"
+  const date=new Intl.DateTimeFormat("fa-IR-u-ca-persian",{
+    timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
   }).format(new Date(pr.at));
   return [
-    "📊 گزارش قیمت بازار",
-    "🗓 آخرین بررسی: " + date,
-    "",
+    "📊 قیمت‌ها | 🕒 "+date,
     priceLine(pr.btc,"btc"),
-    "",
     priceLine(pr.oil,"oil"),
-    "",
     priceLine(pr.usdt,"usdt"),
-    "",
     priceLine(pr.gold,"gold"),
-    "",
-    "ℹ️ مقایسه نفت با شاخص تاریخی تقریبی است؛ روش و منابع در 📚 منابع.",
-    "قیمت‌ها هر ۱۰ دقیقه بررسی می‌شوند؛ نرخ نامعتبر نمایش داده نمی‌شود.",
-    "نفت: آخرین نرخ جهانی معتبر با تاریخ نرخ؛ نرخ بازار در تعطیلات ثابت می‌ماند."
+    "ℹ️ رشدها اسمی و مبناها تقریبی‌اند؛ توضیح: 📚 منابع"
   ].join("\n");
 }
 function sourcesMessage() {
   return [
     "📚 منابع اطلاعات رصدینو",
-    "",
-    "🌤 هواشناسی ۶ شهر منتخب گلستان",
-    "Open-Meteo — داده‌ها و پیش‌بینی مدل هواشناسی برای مرکز هر شهر:",
-    "https://open-meteo.com/",
-    "",
-    "💰 قیمت‌ها",
-    "₿ بیت‌کوین (دلار): CoinGecko — منبع اصلی",
+    "🌤 هواشناسی ۶ شهر: Open-Meteo | https://open-meteo.com/",
+    "₿ بیت‌کوین: CoinGecko (جایگزین Coinbase)",
     "https://www.coingecko.com/en/coins/bitcoin",
-    "در صورت اختلال CoinGecko: Coinbase — منبع جایگزین",
     "https://www.coinbase.com/price/bitcoin",
-    "",
-    "🛢 نفت خام برنت (دلار آمریکا برای هر بشکه): AmericasOilWatch — قرارداد آتی جهانی؛ منبع اصلی",
+    "🛢 نفت خام برنت: AmericasOilWatch (آتی)؛ FRED/EIA و آینه GitHub (نقدی)",
     OIL_PRIMARY_URL,
-    "در صورت اختلال: قیمت نقدی برنت اروپا از EIA به نقل از FRED — داده روزانه",
     "https://fred.stlouisfed.org/series/DCOILBRENTEU",
-    "منبع پشتیبان: آینه داده‌های عمومی EIA در مخزن datasets/oil-prices",
     "https://github.com/datasets/oil-prices",
-    "ℹ️ در زمان استفاده از منبع پشتیبان، نرخ نقدی برنت به‌جای قرارداد آتی نمایش داده می‌شود؛ تاریخ دقیق داده کنار قیمت درج می‌شود.",
+    "💲 تتر: "+TETHER_URL,
+    "🥇 طلا: "+GOLD_URL,
     "",
-    "💲 تتر (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
-    TETHER_URL,
-    "",
-    "🥇 طلای ۱۸ عیار (تومان): شبکه اطلاع‌رسانی طلا و ارز (TGJU)",
-    GOLD_URL,
-    "",
-    "📈 روش درصد رشد: (قیمت فعلی ÷ قیمت مبنا − ۱) × ۱۰۰",
-    "رشدها اسمی‌اند و تورم‌زدایی نشده‌اند.",
-    "مبنای ابتدای ۱۳۵۷ (۱ فروردین = ۲۱ مارس ۱۹۷۸):",
-    "• نفت: ۱۲٫۶۶ دلار برای هر بشکه؛ میانگین مارس ۱۹۷۸ بانک جهانی (نفت سبک عربستان، شاخص تاریخیِ قبل از پیدایش برنت).",
+    "📈 رشد اسمی = (قیمت فعلی ÷ مبنا − ۱) × ۱۰۰؛ بدون تعدیل تورم.",
+    "مبنای ۱۳۵۷: دلار ≈۷ تومان، طلای ۱۸ عیار ≈۳۰ تومان (برآورد)،",
+    "نفت مرجع مارس ۱۹۷۸: ۱۲٫۶۶ دلار (شاخص متفاوت از برنت).",
+    "تتر در ۱۳۵۷ وجود نداشت؛ با دلار تاریخی مقایسه می‌شود.",
+    "مبنای بیت‌کوین: نخستین نرخ دلاری ۵ اکتبر ۲۰۰۹.",
+    "مراجع تاریخی:",
     "https://thedocs.worldbank.org/en/doc/386771467756369668-0050022016/render/CMOHistoricalDataMonthly.pdf",
-    "این نرخ قیمت دقیق ۱ فروردین نیست؛ مقایسه آن با قرارداد آتی برنت امروز صرفاً تقریبی و بین دو شاخص متفاوت است.",
-    "• دلار حدود ۷ تومان صرفاً مبنای محاسبه تاریخی طلا و مقایسه تتر است؛ قیمت روز دلار در رصدینو نمایش داده نمی‌شود.",
     "https://factnameh.com/fa/fact-checks/2018-02-16-dollar-iran-currency",
-    "• طلای ۱۸ عیار: حدود ۳۰ تومان برای هر گرم؛ برآورد از قیمت ۱۷۷٫۲۵ دلار برای اونس جهانی در ۲۱ مارس ۱۹۷۸، دلار حدود ۷ تومان و عیار ۷۵٪.",
     "https://sdbullion.com/gold-prices-1978",
-    "• بیت‌کوین: اولین نرخ دلاری ثبت‌شده در ۵ اکتبر ۲۰۰۹؛ یک دلار = ۱٬۳۰۹٫۰۳ بیت‌کوین (حدود ۰٫۰۰۰۷۶۴ دلار برای هر بیت‌کوین).",
     "https://nakamotoinstitute.org/library/on-the-origins-of-bitcoin/",
-    "• تتر در ۱۳۵۷ وجود نداشت؛ رشد آن فقط قیاس قیمت امروز با دلار تاریخی است.",
-    "",
-    "ℹ️ قیمت‌ها و پیش‌بینی‌ها وابسته به دسترسی و زمان به‌روزرسانی سرویس‌های بالا هستند؛ برای تصمیم‌های حساس، داده‌ها را با منبع اصلی تطبیق بده."
+    "⚠️ نرخ نفت ممکن است مربوط به روز معاملاتی قبل باشد؛ تاریخ آن کنار نرخ می‌آید."
   ].join("\n");
 }
 async function installWebhook(env) {
@@ -1289,7 +1208,7 @@ async function onTelegram(update, env) {
   if(cmd==="/start" || cmd==="/menu" || line==="🚀 شروع"){
     await clearPendingMusic(env,chatId);
     return showMainMenu(env,chatId,null,
-      user.notifications_enabled?"🔔 اعلان قیمت فعال است.":"🔕 برای فعال‌سازی اعلان قیمت: /subscribe");
+      user.notifications_enabled?"🔔 اعلان قیمت روشن":"🔕 اعلان قیمت خاموش | /subscribe");
   }
   if(cmd==="/price" || cmd==="/now" || line==="💰 قیمت" || line==="📊 قیمت بازار")
     return send(env,chatId,report(await prices(env)),priceResultKeyboard());
@@ -1312,25 +1231,23 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/support" || line==="💬 پشتیبان")
     return showSupport(env,chatId);
+
   if(cmd==="/status" || line==="🔔 اعلان‌های من")
-    return send(env,chatId,(user.notifications_enabled?"🔔 اعلان قیمت فعال است.":"🔕 اعلان قیمت غیرفعال است.")+
-      "\n🕙 زمان‌بندی: ۱۰ صبح و ۱۰ شب به وقت ایران.\nفعال‌سازی: /subscribe\nغیرفعال‌سازی: /stop",
+    return send(env,chatId,
+      (user.notifications_enabled?"🔔 اعلان قیمت روشن":"🔕 اعلان قیمت خاموش")+
+      "\n🕙 ۱۰ و ۲۲ (ایران) | روشن: /subscribe | خاموش: /stop",
       simpleBackKeyboard());
   if(cmd==="/subscribe"){
     await setUserNotifications(env,chatId,true);
-    return send(env,chatId,
-      "✅ اعلان قیمت برای حساب شما فعال شد.\n🕙 هر روز ساعت ۱۰ صبح و ۱۰ شب به وقت ایران.\nبرای توقف: /stop",
-      simpleBackKeyboard());
+    return send(env,chatId,"✅ اعلان قیمت روشن | هر روز ۱۰ و ۲۲ (ایران)\nتوقف: /stop",simpleBackKeyboard());
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنمای رصدینو\n💰 قیمت‌ها: بیت‌کوین، نفت برنت، تتر و طلای ۱۸ عیار با رشد تاریخی\n🌤 آب‌وهوا: پیش‌بینی شش شهر گلستان\n📚 منابع: مراجع قیمت و هواشناسی\n📰 اخبار: تیترها و جزئیات ۴۸ ساعت اخیر گلستان\n🎧 رصد موزیک: جست‌وجوی آهنگ با /findmusic fa یا /findmusic us؛ پیشنهادهای ژانری با دکمه‌های منو\n💬 پشتیبانی: گفتگو با @hamidhosseinis\n\nبازکردن منو: /menu\nاعلان قیمت اختیاری و شخصی است.\nدستورات: /start /menu /price /weather /sources /news /music /findmusic /support /subscribe /status /stop",
+      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 موزیک /music | جست‌وجو /findmusic fa نام آهنگ\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
-    return send(env,chatId,
-      "⏸ اعلان‌های زمان‌بندی‌شده فقط برای حساب شما متوقف شد.\nبرای دریافت دوباره: /subscribe\nقیمت، هواشناسی و اخبار همچنان فعال است.",
-      simpleBackKeyboard());
+    return send(env,chatId,"⏸ اعلان قیمت خاموش شد | روشن‌کردن: /subscribe",simpleBackKeyboard());
   }
   if (!line.startsWith("/")) {
     const pending=await env.STATE.get(MUSIC_PENDING_PREFIX+chatId);
@@ -1339,7 +1256,7 @@ async function onTelegram(update, env) {
       return performMusicSearch(env,chatId,pending,line);
     }
   }
-  return showMainMenu(env,chatId,null,"👇 از دکمه‌های زیر استفاده کن.");
+  return showMainMenu(env,chatId,null,"👇 انتخاب کن:");
 }
 
 export default {
@@ -1416,4 +1333,4 @@ export default {
 };
 
 // Export narrow testable helpers; HTTP access still requires the verified webhook.
-export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard, prices, refreshPriceSnapshot, historicalGrowthPercent, priceLine};
+export {registerUser, setUserNotifications, notificationTargets, deliverScheduledReport, GOLESTAN_CITIES, cityWeatherKeyboard, prices, refreshPriceSnapshot, historicalGrowthPercent, priceLine, welcome, report, sourcesMessage, makeNewsMessage};

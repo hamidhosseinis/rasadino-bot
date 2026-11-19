@@ -100,7 +100,7 @@ function cleanForMessage(value) {
 }
 
 export function renderMusicSearch(result,language) {
-  const lang=language==="fa"?"فارسی":"انگلیسی (کاتالوگ آمریکا)";
+  const lang=language==="fa"?"فارسی":"انگلیسی (آمریکا)";
   const footer=[
     [{text:"🔎 جست‌وجوی دیگر",callback_data:"music:search:"+language}],
     [{text:"🎧 رصد موزیک",callback_data:"music:home"},
@@ -108,37 +108,30 @@ export function renderMusicSearch(result,language) {
     [{text:"❌ بستن",callback_data:"menu:close"}]
   ];
   if(result.status==="invalid")return {
-    text:"⚠️ دستور نامعتبر است. نمونه:\n/findmusic fa گوگوش\n/findmusic us Coldplay\n\nعبارت جست‌وجو باید ۲ تا ۷۰ نویسه باشد.",
+    text:"⚠️ دستور نامعتبر؛ ۲ تا ۷۰ نویسه بنویس.\nمثال: /findmusic fa گوگوش | /findmusic us Coldplay",
     keyboard:{inline_keyboard:footer}
   };
   if(result.status==="unavailable")return {
-    text:"⚠️ سرویس‌های جست‌وجوی موسیقی موقتاً پاسخ ندادند. لطفاً بعداً دوباره امتحان کن.\nهیچ آهنگ یا رتبه‌ای ساخته نشده است.",
+    text:"⚠️ سرویس‌های جست‌وجوی موسیقی در دسترس نیستند؛ دوباره امتحان کن.",
     keyboard:{inline_keyboard:footer}
   };
   if(result.status==="empty")return {
-    text:"🔎 نتیجه‌ای با اطلاعات قابل‌تأیید و لینک رسمی پیدا نشد.\nعبارت دیگری امتحان کن.",
+    text:"🔎 نتیجه‌ای با لینک رسمی پیدا نشد؛ عبارت دیگری جست‌وجو کن.",
     keyboard:{inline_keyboard:footer}
   };
-  const lines=["🔎 نتیجه جست‌وجوی موسیقی","🌍 حوزه جست‌وجو: "+lang,
-    "ℹ️ این‌ها نتایج جست‌وجو هستند؛ رتبه‌بندی یا تأیید ملیت خواننده نیستند."];
-  for (let i=0;i<result.tracks.length;i++) {
+  const lines=["🔎 موسیقی | "+lang,"ℹ️ نتیجه جست‌وجوست، نه رتبه‌بندی یا تأیید ملیت."];
+  for(let i=0;i<result.tracks.length;i++){
     const track=result.tracks[i];
-    lines.push(
-      "",
-      PERSIAN_NUMBERS[i]+". 🎵 "+cleanForMessage(track.title),
-      "🎤 "+cleanForMessage(track.artist),
-      ...(track.album?["💿 "+cleanForMessage(track.album)]:[]),
-      ...(track.year?["📅 "+track.year]:[]),
-      ...(track.genre?["🎼 "+cleanForMessage(track.genre)]:[]),
-      "📚 "+track.source
-    );
+    lines.push(PERSIAN_NUMBERS[i]+". 🎵 "+cleanForMessage(track.title)+" — "+
+      cleanForMessage(track.artist)+(track.album?" | "+cleanForMessage(track.album):"")+
+      (track.year?" | "+track.year:"")+
+      (track.genre?" | "+cleanForMessage(track.genre):"")+" | "+track.source);
   }
-  if(result.failedProviders?.length) lines.push("","⚠️ برخی منابع پاسخ ندادند؛ فهرست ممکن است ناقص باشد.");
-  if(result.fromCache) lines.push("","🕘 نتایج ذخیره‌شده از جست‌وجوی پیشین هستند.");
-  lines.push("","▶️ برای بازکردن صفحه رسمی هر آهنگ از دکمه‌های زیر استفاده کن.");
+  if(result.failedProviders?.length)lines.push("⚠️ برخی منابع پاسخ ندادند؛ فهرست ناقص است.");
+  if(result.fromCache)lines.push("🕒 داده ذخیره‌شده");
   const links=result.tracks.map((track,i)=>[{
-    text:"▶️ آهنگ "+PERSIAN_NUMBERS[i]+" — "+track.source,
+    text:"▶️ "+PERSIAN_NUMBERS[i]+" | "+track.source,
     url:track.play_url
   }]);
-  return {text:lines.join("\n"),keyboard:{inline_keyboard:[...links,...footer]}};
+  return {text:lines.join("\n").slice(0,3900),keyboard:{inline_keyboard:[...links,...footer]}};
 }

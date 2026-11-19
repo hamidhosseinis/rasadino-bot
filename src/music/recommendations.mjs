@@ -155,7 +155,7 @@ export async function recommendMusic(env,{language,genre,mode,count,fetcher=glob
 }
 
 export function renderRecommendations(result){
-  const language=result.language==="fa"?"فارسی":"انگلیسی (کاتالوگ آمریکا)";
+  const language=result.language==="fa"?"فارسی":"انگلیسی (آمریکا)";
   const genre=validGenre(result.language,result.genre)?genreName(result.language,result.genre):"نامشخص";
   const mode=labels[result.mode]??"پیشنهاد";
   const footer=[
@@ -164,40 +164,34 @@ export function renderRecommendations(result){
       {text:"🏠 منوی اصلی",callback_data:"main:menu"}],
     [{text:"❌ بستن",callback_data:"menu:close"}]
   ];
-  if(result.status==="unsupported"){
-    const why=result.reason==="daily_chart"
-      ?"برای ترندهای «امروز» هنوز جدول روزانه معتبر، قابل استناد و مجاز در اختیار نداریم."
-      :"در منابع فعلی، جدول رتبه‌بندی قابل‌تأیید مخصوص آهنگ‌های فارسی نداریم.";
-    return {text:"🎧 رصد موزیک\n\n⚠️ "+why+
-      "\nبرای جلوگیری از ارائه رتبه ساختگی، این گزینه فعلاً خروجی ندارد."+
-      "\nمی‌توانی «جدیدترین» یا «انتخاب خودکار» را امتحان کنی.",
-      keyboard:{inline_keyboard:footer}};
-  }
+  if(result.status==="unsupported")return {
+    text:result.reason==="daily_chart"
+      ?"⚠️ جدول روزانه معتبر برای ترند امروز در دسترس نیست.\n🆕 «جدیدترین» یا 🤖 «انتخاب خودکار» را بزن."
+      :"⚠️ جدول معتبر مخصوص رتبه‌بندی فارسی موجود نیست.\n🆕 «جدیدترین» یا 🤖 «انتخاب خودکار» را بزن.",
+    keyboard:{inline_keyboard:footer}
+  };
   if(result.status==="unavailable")return {
-    text:"⚠️ منابع موسیقی موقتاً پاسخ ندادند. هیچ آهنگ یا رتبه ساختگی نمایش داده نمی‌شود.",
-    keyboard:{inline_keyboard:footer}};
+    text:"⚠️ منابع موسیقی موقتاً در دسترس نیستند؛ دوباره امتحان کن.",
+    keyboard:{inline_keyboard:footer}
+  };
   if(result.status!=="ok"||!result.tracks?.length)return {
-    text:"🔎 آهنگ قابل‌تأییدی با این شرایط پیدا نشد. ژانر یا نوع پیشنهاد را تغییر بده.",
-    keyboard:{inline_keyboard:footer}};
-  const notes=["🎧 پیشنهاد رصدینو","🌍 انتخاب زبان: "+language,
-    "🎼 ژانر درخواستی: "+genre,"📌 نوع: "+mode,
-    "📚 مبنا: "+result.sourceNote];
-  if(result.mode==="new")notes.push("🆕 فقط آثار دارای تاریخ انتشار در ۱۸ ماه گذشته؛ مرتب‌شده از جدید به قدیم.");
-  if(result.mode==="smart")notes.push("🤖 انتخاب خودکار بر پایه تازگی، ژانر ثبت‌شده و تنوع هنرمند؛ هنوز سلیقه شخصی تو آموخته نشده است.");
-  notes.push("ℹ️ ژانر، زبان و ملیت خواننده در همه نتایج به‌صورت مستقل تأیید نشده‌اند.");
-  if(result.failedProviders?.length)notes.push("⚠️ اطلاعات به دلیل خطای برخی منابع ممکن است ناقص باشد.");
-  if(result.fromCache)notes.push("🕒 پاسخ از کش معتبر قبلی دریافت شده است.");
+    text:"🔎 آهنگ قابل‌تأییدی پیدا نشد؛ ژانر یا نوع را تغییر بده.",
+    keyboard:{inline_keyboard:footer}
+  };
+  const notes=["🎧 "+language+" | "+genre+" | "+mode,
+    "📚 "+result.sourceNote];
+  if(result.mode==="new")notes.push("🆕 انتشار: ۱۸ ماه گذشته، از جدیدترین");
+  if(result.mode==="smart")notes.push("🤖 انتخاب بر اساس تازگی/ژانر/تنوع؛ هنوز سلیقه شخصی تو آموخته نشده است.");
+  notes.push("ℹ️ ژانر، زبان و ملیت همه آثار مستقلاً تأیید نشده‌اند.");
+  if(result.failedProviders?.length)notes.push("⚠️ اطلاعات به دلیل خطای برخی منابع ناقص است.");
+  if(result.fromCache)notes.push("🕒 داده ذخیره‌شده");
   result.tracks.forEach((track,i)=>{
-    const lines=["",indexLabel[i]+". 🎵 "+safe(track.title),"🎤 "+safe(track.artist)];
-    if(track.release_date)lines.push("📅 "+track.release_date);
-    else if(track.year)lines.push("📅 "+track.year);
-    if(track.genre)lines.push("🎼 "+safe(track.genre));
-    if(track.chart_rank && ["week","classic"].includes(result.mode))
-      lines.push("🏅 رتبه "+track.chart_rank+" در جدول Audius");
-    lines.push("📚 "+track.source);
-    notes.push(...lines);
+    const date=track.release_date||track.year||null;
+    const rank=track.chart_rank&&["week","classic"].includes(result.mode)?" | رتبه "+track.chart_rank:"";
+    notes.push(indexLabel[i]+". 🎵 "+safe(track.title)+" — "+safe(track.artist)+
+      (date?" | "+date:"")+(track.genre?" | "+safe(track.genre):"")+
+      rank+" | "+track.source);
   });
-  notes.push("","▶️ لینک رسمی هر آهنگ:");
-  const links=result.tracks.map((track,i)=>[{text:"▶️ آهنگ "+indexLabel[i]+" — "+track.source,url:track.play_url}]);
-  return {text:notes.join("\n"),keyboard:{inline_keyboard:[...links,...footer]}};
+  const links=result.tracks.map((track,i)=>[{text:"▶️ "+indexLabel[i]+" | "+track.source,url:track.play_url}]);
+  return {text:notes.join("\n").slice(0,3900),keyboard:{inline_keyboard:[...links,...footer]}};
 }
