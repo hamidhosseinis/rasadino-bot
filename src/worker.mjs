@@ -46,6 +46,7 @@ async function telegram(env, method, data = {}) {
 const MAIN_MENU_KEYBOARD = {inline_keyboard:[
   [{text:"💰 قیمت‌ها",callback_data:"price:menu"}, {text:"🌤 آب‌وهوا",callback_data:"weather:menu"}],
   [{text:"📰 اخبار",callback_data:"news:refresh"}, {text:"🎧 رصد موزیک",callback_data:"music:home"}],
+  [{text:"📥 دانلود",callback_data:"download:youtube"}],
   [{text:"📚 منابع",callback_data:"sources:show"}, {text:"💬 پشتیبانی",callback_data:"support:show"}],
   [{text:"❌ بستن منو",callback_data:"menu:close"}]
 ]};
@@ -120,21 +121,13 @@ function priceViewText(pr,asset="all",format="html") {
   ].join("\n");
 }
 async function showMainMenu(env,chatId,messageId=null,note="") {
-  const owner=await env.STATE.get("owner_chat_id");
-  const keyboard=owner && String(owner)===String(chatId)
-    ? {inline_keyboard:[...MAIN_MENU_KEYBOARD.inline_keyboard.slice(0,3),
-      [{text:"📥 دانلود",callback_data:"download:youtube"}],
-      ...MAIN_MENU_KEYBOARD.inline_keyboard.slice(3)]}
-    : MAIN_MENU_KEYBOARD;
-  return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),keyboard,messageId);
+  return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
 }
 async function clearYouTubePending(env,chatId) {
   const key=YOUTUBE_PENDING_PREFIX+chatId;
   if(await env.STATE.get(key))await env.STATE.delete(key);
 }
 async function showYouTubePrompt(env,chatId,messageId=null) {
-  const owner=await env.STATE.get("owner_chat_id");
-  if(!owner || String(owner)!==String(chatId))return showMainMenu(env,chatId,messageId);
   await env.STATE.put(YOUTUBE_PENDING_PREFIX+chatId,"1",{expirationTtl:YOUTUBE_PENDING_TTL});
   return renderMenu(env,chatId,"📥 لینک ویدئوی یوتیوب را بفرست.",simpleBackKeyboard(),messageId);
 }
@@ -142,10 +135,14 @@ async function handleYouTubeLink(env,chatId,input) {
   if(!canonicalYouTubeVideoUrl(input))
     return send(env,chatId,"⚠️ لینک معتبر یوتیوب بفرست.",simpleBackKeyboard());
   const cooldown="download:youtube:cooldown:"+chatId;
+  const daily="download:youtube:quota:"+chatId+":"+new Date().toISOString().slice(0,10);
+  const quota=Number(await env.STATE.get(daily)||0);
+  if(quota>=3)return send(env,chatId,"⌛ سهمیه امروز تمام شد.",simpleBackKeyboard());
   if(await env.STATE.get(cooldown))
     return send(env,chatId,"⌛ کمی بعد دوباره امتحان کن.",simpleBackKeyboard());
   const result=await submitYouTubeJob(env,chatId,input);
   if(result.ok){
+    await env.STATE.put(daily,String(quota+1),{expirationTtl:86400});
     await env.STATE.put(cooldown,"1",{expirationTtl:60});
     await clearYouTubePending(env,chatId);
     return send(env,chatId,"📥 درخواست ثبت شد.",simpleBackKeyboard());
@@ -1323,7 +1320,7 @@ async function installWebhook(env) {
 
 async function onTelegram(update, env) {
   const m=update?.message;
-  if(!m || m.chat?.type!=="private" || typeof m.text!=="string")return;
+  if(!m || m.chat?.type!=="private" || String(m.from?.id)!==String(m.chat?.id) || typeof m.text!=="string")return;
   const chatId=String(m.chat.id);
   const line=m.text.trim();
   const [rawCmd,maybePin]=line.split(/\s+/,2);
@@ -1370,14 +1367,14 @@ async function onTelegram(update, env) {
   }
   if(cmd==="/help" || line==="ℹ️ راهنما")
     return send(env,chatId,
-      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 دریافت فایل موزیک /music | /findmusic نام آهنگ\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
+      "📖 راهنما | /menu\n💰 قیمت /price | 🌤 هوا /weather | 📰 خبر /news\n🎧 موزیک /music | 📥 دانلود ویدئو /download\n📚 منابع /sources | 💬 پشتیبان /support\n🔔 اعلان /subscribe | وضعیت /status | توقف /stop",
       simpleBackKeyboard());
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
     return send(env,chatId,"⏸ اعلان قیمت خاموش شد | روشن‌کردن: /subscribe",simpleBackKeyboard());
   }
   if (!line.startsWith("/")) {
-    if(owner && String(owner)===chatId && await env.STATE.get(YOUTUBE_PENDING_PREFIX+chatId))
+    if(await env.STATE.get(YOUTUBE_PENDING_PREFIX+chatId))
       return handleYouTubeLink(env,chatId,line);
     const pending=await env.STATE.get(MUSIC_PENDING_PREFIX+chatId);
     if (pending==="file" || pending==="fa" || pending==="us") {
