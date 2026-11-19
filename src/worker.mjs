@@ -225,7 +225,7 @@ function cityWeatherKeyboard() {
 }
 async function sendWeatherMenu(env,chatId,messageId=null) {
   return renderMenu(env,chatId,
-    "🌤 هواشناسی گلستان | شهر را انتخاب کن:",
+    "🌤 هواشناسی گلستان | ۶ شهر | انتخاب کن:",
     cityWeatherKeyboard(),messageId);
 }
 async function singleCityWeather(env,cityId) {
@@ -1155,11 +1155,11 @@ function report(pr) {
 function sourcesMessage() {
   return [
     "📚 منابع اطلاعات رصدینو",
-    "🌤 هواشناسی: Open-Meteo | https://open-meteo.com/",
+    "🌤 هواشناسی ۶ شهر: Open-Meteo | https://open-meteo.com/",
     "₿ بیت‌کوین: CoinGecko (جایگزین Coinbase)",
     "https://www.coingecko.com/en/coins/bitcoin",
     "https://www.coinbase.com/price/bitcoin",
-    "🛢 برنت: AmericasOilWatch (آتی)؛ FRED/EIA و آینه GitHub (نقدی)",
+    "🛢 نفت خام برنت: AmericasOilWatch (آتی)؛ FRED/EIA و آینه GitHub (نقدی)",
     OIL_PRIMARY_URL,
     "https://fred.stlouisfed.org/series/DCOILBRENTEU",
     "https://github.com/datasets/oil-prices",
