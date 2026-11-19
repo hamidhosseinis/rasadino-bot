@@ -3,7 +3,7 @@ const samples=["Beethoven","piano","Fur Elise","music","song"];
 for(const name of samples){
   const url=new URL("https://commons.wikimedia.org/w/api.php");
   for(const [k,v] of Object.entries({
-    action:"query",generator:"search",gsrsearch:name,gsrnamespace:"6",gsrlimit:"25",
+    action:"query",generator:"search",gsrsearch:"filetype:audio filemime:audio/mpeg "+name,gsrnamespace:"6",gsrlimit:"25",
     prop:"imageinfo",iiprop:"url|size|mime|extmetadata",format:"json",formatversion:"2"
   }))url.searchParams.set(k,v);
   try{
