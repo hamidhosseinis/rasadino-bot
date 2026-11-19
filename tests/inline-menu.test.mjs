@@ -119,8 +119,8 @@ test("all price options display only chosen asset or full report; refresh uses p
   const {calls,external}=telegramStub(t);
   const e=env();
   for(const [data,n,keyword] of [["price:btc",400,"بیت‌کوین"],["price:usdt",401,"تتر"],
-    ["price:gold",402,"طلا"],["price:all",403,"قیمت‌ها"],
-    ["price:refresh",404,"قیمت‌ها"]]){
+    ["price:gold",402,"طلا"],["price:all",403,"نبض بازار"],
+    ["price:refresh",404,"نبض بازار"]]){
     assert.equal((await deliver(e,callback(994,data,n))).status,200,data);
     assert.match(last(calls,"editMessageText").text,new RegExp(keyword));
     assert.ok(last(calls,"editMessageText").reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="price:menu"));
