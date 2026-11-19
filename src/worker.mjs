@@ -107,14 +107,17 @@ async function removeLegacyKeyboardOnce(env,chatId) {
   });
 }
 
-function priceViewText(pr,asset="all") {
-  if (asset==="all") return report(pr,"html");
+function priceViewText(pr,asset="all",format="html") {
+  if(asset==="all")return report(pr,format);
   const selected={btc:pr.btc,oil:pr.oil,usdt:pr.usdt,gold:pr.gold};
-  const item=selected[asset];
-  const when=item?.updatedAt ? new Intl.DateTimeFormat("fa-IR",{
-    timeZone:TIMEZONE,dateStyle:"short",timeStyle:"short"
-  }).format(new Date(item.updatedAt)) : "نامشخص";
-  return "💰 "+priceLine(item,asset)+"\n🕒 "+when+"\nℹ️ مبنای رشد: 📚 منابع";
+  return [
+    "📡 رصدینو | نبض بازار",
+    persianDateTime(pr.at),
+    "━━━━━━━━━━━━━━━━",
+    marketPriceBlock(selected[asset],asset,format),
+    "━━━━━━━━━━━━━━━━",
+    "ⓘ رشد اسمی و مبنای تاریخی تقریبی؛ توضیح: 📚 منابع"
+  ].join("\n");
 }
 async function showMainMenu(env,chatId,messageId=null,note="") {
   return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
@@ -441,7 +444,7 @@ async function onCallbackQuery(query,env) {
   if(["price:btc","price:usd","price:oil","price:usdt","price:gold","price:all","price:refresh"].includes(action)){
     const asset=action==="price:refresh"?"all":(action==="price:usd"?"oil":action.slice(6));
     return renderMenu(env,chatId,priceViewText(await prices(env),asset),priceResultKeyboard(),
-      messageId,asset==="all"?"HTML":null);
+      messageId,"HTML");
   }
   if(action==="price:sources")return renderMenu(env,chatId,sourcesMessage(),{
     inline_keyboard:[
