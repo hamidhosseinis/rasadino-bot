@@ -55,6 +55,9 @@ test("reject invalid input, hostile hosts, large or unlicensed files",()=>{
   assert.equal(normalizeCommonsFile(audioPage("Bad.mp3","CC0","https://upload.wikimedia.org.evil.example/file.mp3")),null);
   assert.equal(normalizeCommonsFile(audioPage("Bad.ogg")),null);
   assert.ok(normalizeCommonsFile(audioPage()));
+  const cc0deed=audioPage();
+  cc0deed.imageinfo[0].extmetadata.LicenseUrl.value="http://creativecommons.org/publicdomain/zero/1.0/deed.en";
+  assert.ok(normalizeCommonsFile(cc0deed));
 });
 
 test("fuzzy correction uses real CC0 results without fabricating songs",async()=>{
@@ -70,6 +73,7 @@ test("fuzzy correction uses real CC0 results without fabricating songs",async()=
   const view=audioChoicesView(r.files);
   assert.equal(view.keyboard.inline_keyboard.flat().some(b=>"url" in b),false);
   assert.ok(calls[0].startsWith("https://commons.wikimedia.org/w/api.php?"));
+  assert.match(new URL(calls[0]).searchParams.get("gsrsearch"),/^filetype:audio filemime:audio\/mpeg /);
   const bad=await findAudioFiles("Random Stranger",{fetcher});
   assert.equal(bad.status,"empty");
 });
