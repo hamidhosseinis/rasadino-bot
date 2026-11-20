@@ -96,7 +96,7 @@ function monthlyReport(sheetId,m){
 function listOutstanding(sheetId,kind){
   const isDebt=kind==="list_debts",name=isDebt?"وام‌ها و بدهی‌ها":"چک‌ها";
   const tab=sheetFor(name,sheetId),last=tab.getLastRow();
-  const data=last>1?tab.getRange(Math.max(2,last-199),1,Math.min(199,last-1),isDebt?12:10).getValues():[];
+  const data=last>1?tab.getRange(Math.max(2,last-198),1,Math.min(199,last-1),isDebt?12:10).getValues():[];
   const statusIndex=isDebt?9:7,items=[];
   for(let i=data.length-1;i>=0&&items.length<8;i--){
     const row=data[i];
