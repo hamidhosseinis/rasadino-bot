@@ -1,5 +1,6 @@
 
 import {checkMusicSearchRate} from "./music/search.mjs";
+import {financeKeyboard,financePrompt,isFinanceMessage,parseFinanceEntry,localStamp,configured as financeConfigured,financeRequest} from "./finance/finance.mjs";
 import {validAudioQuery,findAudioFiles,audioHomeView,audioRetryView,audioChoicesView,confidentAudioMatch} from "./music/audio.mjs";
 
 const TIMEZONE = "Asia/Tehran";
@@ -119,7 +120,14 @@ function priceViewText(pr,asset="all",format="html") {
   ].join("\n");
 }
 async function showMainMenu(env,chatId,messageId=null,note="") {
-  return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),MAIN_MENU_KEYBOARD,messageId);
+  const owner=await env.STATE.get("owner_chat_id");
+  // Finance entry is intentionally owner-only; never show it to public users.
+  const keyboard=owner===String(chatId)?{inline_keyboard:[
+    ...MAIN_MENU_KEYBOARD.inline_keyboard.slice(0,-1),
+    [{text:"💼 حسابداری من",callback_data:"finance:home"}],
+    ...MAIN_MENU_KEYBOARD.inline_keyboard.slice(-1)
+  ]}:MAIN_MENU_KEYBOARD;
+  return renderMenu(env,chatId,welcome()+(note?"\n\n"+note:""),keyboard,messageId);
 }
 async function showPriceMenu(env,chatId,messageId=null) {
   return renderMenu(env,chatId,"💰 قیمت‌ها | انتخاب کن:",priceMenuKeyboard(),messageId);
@@ -445,6 +453,35 @@ async function onCallbackQuery(query,env) {
     return renderMenu(env,chatId,
       "✅ منو بسته شد | بازکردن: /menu",
       {inline_keyboard:[]},messageId);
+  }
+  if(action.startsWith("finance:")){
+    const owner=await env.STATE.get("owner_chat_id");
+    if(owner!==chatId)return showMainMenu(env,chatId,messageId);
+    if(!financeConfigured(env))return renderMenu(env,chatId,
+      "⚠️ حسابداری هنوز به گوگل شیت متصل نشده است.",financeKeyboard(),messageId);
+    if(action==="finance:report"){
+      const month=localStamp().month;
+      const data=await financeRequest(env,"summary_month",{month});
+      const fmt=n=>new Intl.NumberFormat("fa-IR").format(Number(n)||0);
+      const cats=Object.entries(data.categories||{}).sort((a,b)=>b[1]-a[1]).slice(0,9);
+      const details=cats.map(x=>"• "+x[0]+": "+fmt(x[1])).join("\n");
+      return renderMenu(env,chatId,("📊 هزینه‌های "+month+"\nجمع: "+fmt(data.total)+" تومان"+
+        "\nتعداد ثبت: "+fmt(data.count)+(details?"\n\n"+details:"\nهنوز هزینه‌ای ثبت نشده.")),
+        financeKeyboard(),messageId);
+    }
+    if(action==="finance:debtlist"||action==="finance:checklist"){
+      const debt=action==="finance:debtlist";
+      const data=await financeRequest(env,debt?"list_debts":"list_checks");
+      const fmt=n=>new Intl.NumberFormat("fa-IR").format(Number(n)||0);
+      const rows=(data.items||[]).map(x=>debt
+        ?"• "+x.name+" | مانده "+fmt(x.balance)+" تومان | "+x.due
+        :"• "+x.name+" | "+fmt(x.amount)+" تومان | "+x.due);
+      return renderMenu(env,chatId,(debt?"🏦 بدهی‌ها و وام‌های فعال":"🧾 چک‌های باز")+
+        "\n"+(rows.join("\n")||"موردی ثبت نشده."),financeKeyboard(),messageId);
+    }
+    const type={ "finance:home":null,"finance:expense":"expense",
+      "finance:debt":"debt","finance:check":"check"}[action];
+    return renderMenu(env,chatId,financePrompt(type),financeKeyboard(),messageId);
   }
   if(action.startsWith("music:")){
     if(/^music:pick:[0-2]$/.test(action)){
@@ -1308,6 +1345,10 @@ async function onTelegram(update, env) {
     return send(env,chatId,sourcesMessage(),simpleBackKeyboard());
   if(cmd==="/news" || line==="📰 اخبار")
     return sendGolestanNews(env,chatId,true,0);
+  if(cmd==="/finance") {
+    if(owner!==chatId)return showMainMenu(env,chatId);
+    return send(env,chatId,financeConfigured(env)?financePrompt(): "⚠️ حسابداری هنوز به گوگل شیت متصل نشده است.",financeKeyboard());
+  }
   if(cmd==="/music" || line==="🎧 رصد موزیک")return musicFilePrompt(env,chatId);
   if(cmd==="/findmusic"){
     const query=line.replace(/^\/findmusic(?:@[a-zA-Z0-9_]+)?(?:\s+(?:fa|us))?\s*/i,"");
@@ -1334,6 +1375,16 @@ async function onTelegram(update, env) {
   if(cmd==="/stop"){
     await setUserNotifications(env,chatId,false);
     return send(env,chatId,"⏸ اعلان قیمت خاموش شد | روشن‌کردن: /subscribe",simpleBackKeyboard());
+  }
+  if(owner===chatId && isFinanceMessage(line)) {
+    if(!financeConfigured(env))return send(env,chatId,
+      "⚠️ اتصال حسابداری به گوگل شیت هنوز راه‌اندازی نشده است.",financeKeyboard());
+    const entry=parseFinanceEntry(line);
+    if(!entry)return send(env,chatId,
+      "⚠️ اطلاعات ناقص یا نامعتبر است. قالب درست را از دکمه مربوط انتخاب کن.",financeKeyboard());
+    await financeRequest(env,entry.action,entry.data,"tg:"+update.update_id);
+    const labels={append_expense:"هزینه",append_debt:"وام یا بدهی",append_check:"چک"};
+    return send(env,chatId,"✅ "+labels[entry.action]+" در گوگل شیت ثبت شد.",financeKeyboard());
   }
   if (!line.startsWith("/")) {
     const pending=await env.STATE.get(MUSIC_PENDING_PREFIX+chatId);
