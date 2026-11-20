@@ -110,7 +110,8 @@ export function isFinanceMessage(text){
 }
 export function financeKeyboard(){return {inline_keyboard:[
   [{text:"💸 هزینه",callback_data:"finance:expense"},{text:"🏦 بدهی و وام",callback_data:"finance:debt"}],
-  [{text:"🧾 چک‌ها",callback_data:"finance:check"},{text:"📊 گزارش ماه",callback_data:"finance:report"}],
+  [{text:"🧾 ثبت چک",callback_data:"finance:check"},{text:"📊 گزارش ماه",callback_data:"finance:report"}],
+  [{text:"📋 بدهی‌های فعال",callback_data:"finance:debtlist"},{text:"📋 چک‌های باز",callback_data:"finance:checklist"}],
   [{text:"🏠 منوی اصلی",callback_data:"main:menu"},{text:"❌ بستن",callback_data:"menu:close"}]
 ]};}
 export function financePrompt(kind) {
