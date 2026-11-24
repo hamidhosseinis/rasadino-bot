@@ -46,6 +46,7 @@ const MAIN_MENU_KEYBOARD = {inline_keyboard:[
   [{text:"💰 قیمت‌ها",callback_data:"price:menu"}, {text:"🌤 آب‌وهوا",callback_data:"weather:menu"}],
   [{text:"📰 اخبار",callback_data:"news:refresh"}, {text:"🎧 رصد موزیک",callback_data:"music:home"}],
   [{text:"📚 منابع",callback_data:"sources:show"}, {text:"💬 پشتیبانی",callback_data:"support:show"}],
+  [{text:"💼 حسابداری شخصی",callback_data:"finance:home"}],
   [{text:"❌ بستن منو",callback_data:"menu:close"}]
 ]};
 const BACK_CLOSE = [
@@ -426,6 +427,10 @@ async function onCallbackQuery(query,env) {
     return renderMenu(env,chatId,
       "✅ منو بسته شد | بازکردن: /menu",
       {inline_keyboard:[]},messageId);
+  }
+  if(action==="finance:home"){
+    await clearPendingMusic(env,chatId);
+    return renderMenu(env,chatId,financeStatus(env),simpleBackKeyboard(),messageId);
   }
   if(action.startsWith("music:")){
     if(/^music:pick:[0-2]$/.test(action)){
@@ -1270,6 +1275,13 @@ async function installWebhook(env) {
   return "installed";
 }
 
+function financeStatus(env){
+  return "💼 حسابداری شخصی | تراز\n\n"+
+    "دریافتی‌ها • پرداختی‌ها • وام‌ها • اقساط • چک‌ها\n"+
+    "⏳ Google Sheets: اتصال نهایی و آزمایش نشده\n"+
+    "⏳ Google Calendar: اتصال هنوز فعال نیست\n"+
+    "ثبت اطلاعات مالی تا تأیید امنیت و صحت محاسبات غیرفعال است.";
+}
 async function onTelegram(update, env) {
   const m=update?.message;
   if(!m || m.chat?.type!=="private" || typeof m.text!=="string")return;
@@ -1294,6 +1306,10 @@ async function onTelegram(update, env) {
     return send(env,chatId,sourcesMessage(),simpleBackKeyboard());
   if(cmd==="/news" || line==="📰 اخبار")
     return sendGolestanNews(env,chatId,true,0);
+  if(cmd==="/finance" || line==="💼 حسابداری شخصی"){
+    await clearPendingMusic(env,chatId);
+    return send(env,chatId,financeStatus(env),simpleBackKeyboard());
+  }
   if(cmd==="/music" || line==="🎧 رصد موزیک")return musicFilePrompt(env,chatId);
   if(cmd==="/findmusic"){
     const query=line.replace(/^\/findmusic(?:@[a-zA-Z0-9_]+)?(?:\s+(?:fa|us))?\s*/i,"");
