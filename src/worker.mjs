@@ -303,31 +303,12 @@ async function setUserNotifications(env, chatId, enabled) {
 }
 async function* notificationTargets(env) {
   const owner = await env.STATE.get("owner_chat_id");
-  let ownerRegistered = false;
-  let cursor;
-  do {
-    const page = await env.STATE.list({
-      prefix: USER_PREFIX,
-      limit: 1000,
-      ...(cursor ? {cursor} : {})
-    });
-    for (const key of page.keys || []) {
-      const id = key.name.slice(USER_PREFIX.length);
-      if (!/^\d{1,20}$/.test(id)) continue;
-      if (id === owner) ownerRegistered = true;
-      let enabled = key.metadata?.notifications_enabled;
-      if (typeof enabled !== "boolean") {
-        enabled = (await readUser(env, id))?.notifications_enabled === true;
-      }
-      if (enabled) yield id;
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  // Preserve previously scheduled messages for the verified owner until they
-  // explicitly opt out. Never override an owner's recorded opt-out.
-  if (owner && !ownerRegistered && /^\d{1,20}$/.test(owner)) yield owner;
+  if (!owner || !/^\d{1,20}$/.test(owner)) return;
+  const user = await readUser(env, owner);
+  if (!user || user.notifications_enabled === true) yield owner;
 }
 async function deliverScheduledReport(env, chatId, owner, slot, message) {
+  if (!owner || chatId !== owner || await env.STATE.get("owner_chat_id") !== owner) return false;
   const key = "sent:" + slot + ":" + chatId;
   if (await env.STATE.get(key)) return false;
   const legacyKey = "sent:" + slot;
@@ -520,6 +501,13 @@ async function onCallbackQuery(query,env) {
   return showMainMenu(env,chatId,messageId);
 }
 async function onUpdate(update,env) {
+  const owner = await env.STATE.get("owner_chat_id");
+  const callback = update?.callback_query;
+  const message = callback ? callback.message : update?.message;
+  const sender = callback ? callback.from : message?.from;
+  if (!owner || !/^\d{1,20}$/.test(owner) ||
+      message?.chat?.type !== "private" ||
+      String(message.chat.id) !== owner || String(sender?.id) !== owner) return;
   if(update.callback_query) return onCallbackQuery(update.callback_query,env);
   return onTelegram(update,env);
 }
@@ -1289,9 +1277,7 @@ async function onTelegram(update, env) {
   const line=m.text.trim();
   const [rawCmd,maybePin]=line.split(/\s+/,2);
   const cmd=rawCmd.split("@")[0].toLowerCase();
-  const owner=await env.STATE.get("owner_chat_id");
-  if(cmd==="/start" && !owner && env.LINK_CODE && maybePin===env.LINK_CODE)
-    await env.STATE.put("owner_chat_id",chatId);
+  // Owner enrollment is disabled in private mode.
   const user=await registerUser(env,chatId);
   await removeLegacyKeyboardOnce(env,chatId);
 
@@ -1365,28 +1351,8 @@ export default {
       }
       return new Response("ok");
     }
-    if (request.method === "GET" && url.pathname === "/news/status") {
-      const data=await env.STATE.get("news:golestan:last_scan");
-      return Response.json(data?JSON.parse(data):{status:"not_scanned_yet"},{headers:{"Cache-Control":"no-store"}});
-    }
-    if (request.method === "GET" && url.pathname === "/prices") {
-      const data = await prices(env);
-      return Response.json({report: report(data), quotes:data}, {headers: {"Cache-Control":"no-store"}});
-    }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
-      let webhook = "not_configured";
-      if (env.BOT_TOKEN && env.WEBHOOK_SECRET && env.PUBLIC_URL) {
-        try { webhook = await installWebhook(env); }
-        catch(e) { webhook = "error: " + String(e.message); }
-      }
-      return Response.json({
-        service:"hamid-price-report-telegram-bot",
-        configured: Boolean(env.BOT_TOKEN && env.WEBHOOK_SECRET && env.STATE),
-        linked: Boolean(await env.STATE.get("owner_chat_id")),
-        access: "public", notifications: "opt-in",
-        webhook,
-        timezone:TIMEZONE, price_refresh_minutes:10, scheduled_local_times:["10:00","22:00"]
-      }, {headers:{"Cache-Control":"no-store"}});
+      return Response.json({service:"rasadino",access:"private"},{headers:{"Cache-Control":"no-store"}});
     }
     return new Response("Not found", {status:404});
   },
